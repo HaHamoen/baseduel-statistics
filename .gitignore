@@ -1,0 +1,18 @@
+# Snapshots of the bots' databases: player data, never committed.
+.snap/
+# What the exporter writes, rebuilt from the snapshots.
+web/public/data/
+web/dist/
+web/node_modules/
+# Cloudflare credentials.
+.cloudflare.env
+__pycache__/
+*.pyc
+*.tmp
+# Design handoff kits (screenshots, snapshots): rebuilt on demand.
+design-handoff/
+design-handoff*.zip
+# tools/refresh.sh's own state.
+.refresh.lock
+.deployed-*
+.deploy.log

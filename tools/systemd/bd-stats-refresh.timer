@@ -1,0 +1,11 @@
+# Every 15 minutes, counted from the end of the last run, so two never overlap
+# (refresh.sh also takes a lock). The first run is a minute after enabling.
+[Unit]
+Description=bd-stats: refresh the stats site every 15 minutes
+
+[Timer]
+OnActiveSec=1min
+OnUnitInactiveSec=15min
+
+[Install]
+WantedBy=timers.target

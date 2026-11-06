@@ -1,0 +1,18 @@
+# Rebuild the stats site from the bots' databases and deploy it when it
+# changed (tools/refresh.sh). Started by bd-stats-refresh.timer.
+[Unit]
+Description=bd-stats: refresh the stats site from the bots' databases
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=bdstats
+WorkingDirectory=/home/bdstats/bd-stats
+ExecStart=/home/bdstats/bd-stats/tools/refresh.sh main
+# The bots come first: lower CPU and disk priority, and a hard memory cap
+# (the export peaks near 400 MB).
+Nice=10
+IOSchedulingClass=idle
+MemoryMax=1G
+TimeoutStartSec=15min
