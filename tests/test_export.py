@@ -602,6 +602,21 @@ class TestWriter(ExportCase):
             ex.MAX_FILES = old
 
 
+class TestLastMatch(ExportCase):
+    def test_the_last_match_and_the_count_read_only(self):
+        # tools/refresh.sh's question for a league-triggered run: was a
+        # match added? Asked of the live database, so it must change nothing.
+        from exporter.__main__ import last_match
+        self.assertEqual(last_match(self.league.path), "0 0")
+        self.league.match()
+        b = self.league.match()
+        before = os.stat(self.league.path)
+        self.assertEqual(last_match(self.league.path), "%d 2" % b)
+        after = os.stat(self.league.path)
+        self.assertEqual((before.st_size, before.st_mtime_ns),
+                         (after.st_size, after.st_mtime_ns))
+
+
 class TestRules(unittest.TestCase):
     def test_names_fold_as_sqlite_does(self):
         self.assertEqual(fold("GoLdEn Knight"), "golden knight")

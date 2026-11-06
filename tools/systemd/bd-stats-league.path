@@ -1,0 +1,16 @@
+# Start bd-stats-league.service as soon as the league bot writes its database
+# (its write-ahead log takes every write, the main file a checkpoint) or
+# ss-replay publishes a replay (its index: the match page gets its link).
+# A write while that service is running starts nothing more; the timer is the
+# backstop for it.
+[Unit]
+Description=bd-stats: watch the league database for a finished match
+
+[Path]
+PathModified=/home/bdstats/PyCore/baseduel.db
+PathModified=/home/bdstats/PyCore/baseduel.db-wal
+PathModified=/home/bdstats/ss-replay/web/public/data/index.json
+Unit=bd-stats-league.service
+
+[Install]
+WantedBy=paths.target

@@ -1,0 +1,24 @@
+# Refresh the site soon after a league match: tools/refresh.sh with
+# TRIGGER=league, started by bd-stats-league.path. It goes on only for a new
+# league match or replay, and waits for a run already going.
+[Unit]
+Description=bd-stats: refresh the stats site after a league match
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=bdstats
+WorkingDirectory=/home/bdstats/bd-stats
+Environment=TRIGGER=league
+# A finished match comes with a few more writes (the bot clears its arena
+# lock and recording flags): they land in these seconds and start no second
+# run.
+ExecStartPre=/bin/sleep 15
+ExecStart=/home/bdstats/bd-stats/tools/refresh.sh main
+# As bd-stats-refresh.service: the bots come first.
+Nice=10
+IOSchedulingClass=idle
+MemoryMax=1G
+# Up to 15 minutes waiting for another run's lock, then its own.
+TimeoutStartSec=30min
