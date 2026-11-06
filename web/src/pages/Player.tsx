@@ -1,8 +1,8 @@
 import { useMemo, useRef, useState } from "preact/hooks";
-import { ChartNote, LineChart, niceTicks } from "../charts";
+import { ChartNote, LineChart, niceRange, niceTicks } from "../charts";
 import {
-  getMeta, getPlayer, getPlayers, type Career, type MateRow, type PlayerIndex, type PlayerSection,
-  type Section,
+  getMeta, getPlayer, getPlayers, type Career, type MateRow, type PlayerIndex, type PlayerRating,
+  type PlayerSection, type Section,
 } from "../data";
 import { rowKpm } from "../board";
 import { careerFigures } from "../career";
@@ -96,8 +96,12 @@ function SectionView({ section, sec, scope, earlier, players }: {
   // "tile -> chart -> table" link): its tile is pressed, the chart draws it,
   // and the list lights the columns it comes from.
   const [want, setWant] = useState<Metric>("winpct");
+  const rating = sec.rating || null;
+  // A rating covers the whole section, whichever button is chosen, so its
+  // chart needs only two points of its own.
   const chartable = useMemo(() => !c ? [] : METRICS.map(([m]) => m)
-    .filter((m) => list.filter((r) => charted(r, m)).length >= MIN_FOR_TREND), [list, c]);
+    .filter((m) => m === "rating" ? (rating?.history.length || 0) >= 2
+      : list.filter((r) => charted(r, m)).length >= MIN_FOR_TREND), [list, c, rating]);
   const metric = chartable.includes(want) ? want : chartable[0] ?? null;
   const chart = useRef<HTMLDivElement>(null);
   // A tile far above the chart (a phone) brings the chart into view; one
@@ -110,9 +114,12 @@ function SectionView({ section, sec, scope, earlier, players }: {
   return (
     <section class="card">
       <h2>{SECTION_NAMES[section]}{scope !== "all" && slice ? ` · ${slice}` : ""}</h2>
-      <CareerView c={c} scope={scope} earlier={earlier} metric={metric} chartable={chartable} onPick={pick} />
+      <CareerView c={c} scope={scope} earlier={earlier} metric={metric} chartable={chartable} onPick={pick}
+                  rating={rating} section={section} />
       <div ref={chart}>
-        {metric && <FormChart list={list} career={c!} metric={metric} chartable={chartable} onMetric={setWant} />}
+        {metric === "rating" && rating
+          ? <RatingChart rating={rating} all={all} section={section} chartable={chartable} onMetric={setWant} />
+          : metric && <FormChart list={list} career={c!} metric={metric} chartable={chartable} onMetric={setWant} />}
       </div>
       <Mates key={scope} name={sec.name} mates={sec.mates?.[scope]} players={players}
              compare={(other) => compareHref(sec.name, other, new URLSearchParams({ s: section, ...(scope !== "all" ? { scope } : {}) }))} />
@@ -146,9 +153,10 @@ function Stat({ label, value, sub, untracked = false, help, chart }: {
   );
 }
 
-function CareerView({ c, scope, earlier, metric, chartable, onPick }: {
+function CareerView({ c, scope, earlier, metric, chartable, onPick, rating, section }: {
   c: Career | null; scope: string; earlier: string;
   metric: Metric | null; chartable: Metric[]; onPick: (m: Metric) => void;
+  rating: PlayerRating | null; section: Section;
 }) {
   if (!c) {
     const w = SCOPE_WORDS[scope];
@@ -163,6 +171,12 @@ function CareerView({ c, scope, earlier, metric, chartable, onPick }: {
   return (
     <>
       <div class="stats">
+        {rating && (
+          <Stat label="Rating" value={num(rating.rating)} sub={`#${num(rating.rank)} of ${num(rating.of)}`}
+                help={`Over every ${section === "pub" ? "pub and private" : "league"} match with a win or a loss, ` +
+                      `whichever button is chosen; bots are not rated. Everyone starts at ${num(rating.start)}.`}
+                chart={chart("rating")} />
+        )}
         <Stat label="Record" value={`${num(c.wins)}–${num(losses)}`}
               sub={`${pct}% of ${plural(decided, "decided match", "decided matches")}`} chart={chart("winpct")} />
         <Stat label="Matches" value={num(c.matches)}
@@ -205,14 +219,14 @@ const WINDOWS = [10, 20, 50, 100, 200, 500];
 const MIN_FOR_TREND = 20;
 const MAX_POINTS = 800;
 
-type Metric = "winpct" | "kd" | "kpm";
-const METRICS: [Metric, string][] = [["winpct", "Win%"], ["kd", "K/D"], ["kpm", "KPM"]];
+type Metric = "rating" | "winpct" | "kd" | "kpm";
+const METRICS: [Metric, string][] = [["rating", "Rating"], ["winpct", "Win%"], ["kd", "K/D"], ["kpm", "KPM"]];
 /** Whether a match is in a measure's run: Win% counts decided matches, K/D
  * and KPM every match with a result, as a career does. */
 const charted = (r: Played, m: Metric) => m === "winpct" ? r.result === "W" || r.result === "L" : r.result !== "-";
 /** The list's column for each measure. */
 type Col = "result" | "r" | "kpm";
-const LIT: Record<Metric, Col[]> = { winpct: ["result"], kd: ["r"], kpm: ["kpm"] };
+const LIT: Record<Metric, Col[]> = { rating: ["result"], winpct: ["result"], kd: ["r"], kpm: ["kpm"] };
 
 /** Form: one measure at a time over a run of matches, oldest on the left.
  * One line, so no legend: the buttons name it. Win% counts the run's decided
@@ -224,13 +238,7 @@ function FormChart({ list, career, metric, chartable, onMetric }: {
   const eligible = useMemo(() => [...list].reverse().filter((r) => charted(r, metric)), [list, metric]);
   // Too few matches for a trend: no chart at all (the section leaves it out),
   // rather than a heading over an apology.
-  const head = (
-    <div class="chart-head">
-      <h3>Form</h3>
-      <Pills label="Measure" value={metric} onChange={onMetric}
-             options={METRICS.map(([m, t]) => [m, t, !chartable.includes(m)] as [Metric, string, boolean])} />
-    </div>
-  );
+  const head = <ChartHead title="Form" metric={metric} chartable={chartable} onMetric={onMetric} />;
   const window = [...WINDOWS].reverse().find((w) => w <= Math.max(WINDOWS[0], eligible.length / 8))!;
   // Sliding sums, so a 20,000-match career costs one pass.
   const values: number[] = [];
@@ -281,6 +289,58 @@ function FormChart({ list, career, metric, chartable, onMetric }: {
         }}
       />
       <ChartNote>Each point is the {window} matches up to it, oldest on the left; the axis counts matches played.</ChartNote>
+    </>
+  );
+}
+
+function ChartHead({ title, metric, chartable, onMetric }: {
+  title: string; metric: Metric; chartable: Metric[]; onMetric: (m: Metric) => void;
+}) {
+  return (
+    <div class="chart-head">
+      <h3>{title}</h3>
+      <Pills label="Measure" value={metric} onChange={onMetric}
+             options={METRICS.map(([m, t]) => [m, t, !chartable.includes(m)] as [Metric, string, boolean])} />
+    </div>
+  );
+}
+
+/** The rating after each match with a win or a loss, oldest on the left,
+ * against the line everyone starts on. Every match of the section, whichever
+ * button is chosen: a rating is one number for all of them. */
+function RatingChart({ rating, all, section, chartable, onMetric }: {
+  rating: PlayerRating; all: Played[]; section: Section; chartable: Metric[]; onMetric: (m: Metric) => void;
+}) {
+  const h = rating.history;
+  const byId = useMemo(() => new Map(all.map((r) => [r.id, r])), [all]);
+  const stride = Math.ceil(h.length / MAX_POINTS);
+  const picks = h.map((_, i) => i).filter((i) => i % stride === 0 || i === h.length - 1);
+  const shown = picks.map((i) => h[i][1]);
+  const { min, max, ticks } = niceRange(Math.min(...shown, rating.start), Math.max(...shown, rating.start));
+  const n = shown.length;
+  const change = (i: number) => h[i][1] - (i > 0 ? h[i - 1][1] : rating.start);
+  return (
+    <>
+      <ChartHead title="Rating" metric="rating" chartable={chartable} onMetric={onMetric} />
+      <LineChart
+        label={`Rating after each of ${num(h.length)} rated matches; now ${num(rating.rating)}`}
+        xs={n} series={[{ id: "rating", label: "Rating", cls: "viz-1", values: shown }]}
+        yMin={min} yMax={max} yTicks={ticks} yFmt={num}
+        xTicks={[...new Set([0, Math.floor((n - 1) / 2), n - 1])]} xFmt={(j) => num(picks[j] + 1)}
+        reference={{ y: rating.start, label: `start ${num(rating.start)}` }}
+        tip={(j) => {
+          const i = picks[j];
+          const r = byId.get(h[i][0]);
+          const d = change(i);
+          return {
+            head: `Match #${h[i][0]}${r?.started_at ? " · " + shortDate(r.started_at) : ""}`,
+            rows: [{ label: "rating", value: num(h[i][1]) },
+                   { label: "this match", value: d > 0 ? `+${d}` : d < 0 ? `−${-d}` : "±0" }],
+            note: r ? `${{ W: "Won", L: "Lost" }[r.result] || ""} ${r.score_for}–${r.score_against}` : undefined,
+          };
+        }}
+      />
+      <ChartNote>After each match with a win or a loss, oldest on the left; the axis counts them. Every {section === "pub" ? "pub and private" : "league"} match, whichever button is chosen.</ChartNote>
     </>
   );
 }

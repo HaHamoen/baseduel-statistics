@@ -104,7 +104,7 @@ export function Bases({ query }: { query: URLSearchParams }) {
             </table>
           </div>
         )}
-        <p class="note">Every round of the bots' matches that a person played in; matches of bots alone are left out.
+        <p class="note">Every round of the bots' matches that a person played in; matches of bots alone are left out{section === "league" ? ", and so are league matches nobody won" : ""}.
           {first ? ` Matches before ${date(first)} recorded no bases.` : ""}</p>
         <p class="note">Shares are of the rounds somebody won. {section === "pub" ? "A private match's 100 and 200 count as Freq 0 and Freq 1. " : ""}
           Greyed: fewer than {THIN} such rounds, too few to read much into. A column heading sorts by it.</p>

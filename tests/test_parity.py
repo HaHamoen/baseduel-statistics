@@ -12,6 +12,7 @@ found at $BD_STATS_PYCORE or ~/PyCore and only ever read: no bytecode is
 written there, and its readers run on a copy, since their start() migrates.
 """
 import json
+import math
 import os
 import sys
 import tempfile
@@ -384,6 +385,42 @@ def check_insights(rep, pub_path, league_path, data, league_exclude):
     conn.close()
 
 
+def check_ratings(rep, pub_path, league_path, data, league_exclude):
+    """ratings/<section>.json against tools/ratings-study/, the code the
+    method was chosen with: its own queries and its own Weng-Lin, replaying
+    every decided match with the bots left out. Each rated player's skill,
+    uncertainty and shown rating, and nobody rated on one side only."""
+    import fnmatch
+    sys.path.insert(0, os.path.join(ROOT, "tools", "ratings-study"))
+    from compare import WengLin, load as study_load
+    from exporter import ratings
+    pub, league, pub_bots = study_load(pub_path, league_path)
+    lbot = lambda n: any(fnmatch.fnmatchcase(n, p.lower()) for p in league_exclude)
+    for section, games, is_bot in (("pub", pub, lambda n: n in pub_bots), ("league", league, lbot)):
+        m = WengLin(beta=ratings.BETA, tau=ratings.TAU, team="mean")
+        played = set()
+        for _era, _mid, w, ps in games:
+            # One rule the study never needed: a name listed twice in one
+            # match (league #22) counts for neither team in it.
+            names = [p[0] for p in ps if p[2]]
+            people = [p for p in ps if not is_bot(p[0]) and names.count(p[0]) < 2]
+            m.update(people, w)
+            played.update(p[0] for p in people if p[2])
+        theirs = {player_key(n): (round(m.mu[n], 3), round(math.sqrt(m.var[n]), 3),
+                                  ratings.shown(m.mu[n], math.sqrt(m.var[n]))) for n in played}
+        got = load(data, "ratings/%s.json" % section)
+        ours = {r[0]: (r[4], r[5], r[1]) for r in got["rows"]}
+        rep.checked += 1
+        if set(theirs) != set(ours):
+            rep.failures.append("ratings %s: study rates %d players, site %d (%d differ)" % (
+                section, len(theirs), len(ours), len(set(theirs) ^ set(ours))))
+        for key in sorted(set(theirs) & set(ours)):
+            rep.checked += 1
+            t, o = theirs[key], ours[key]
+            if abs(t[0] - o[0]) > 0.002 or abs(t[1] - o[1]) > 0.002 or t[2] != o[2]:
+                rep.failures.append("ratings %s %s: study %r, site %r" % (section, key, t, o))
+
+
 def check_mates(rep, path, data, section, league_exclude):
     """Teammates and rivals on a sample of player pages (the 20 busiest and
     every 40th) against a self-join written apart from the exporter: who
@@ -494,6 +531,8 @@ def main(argv):
                         load(data, "meta.json")["league_exclude"])
             check_insights(rep, pub_copy, league_copy, data,
                            load(data, "meta.json")["league_exclude"])
+            check_ratings(rep, pub_copy, league_copy, data,
+                          load(data, "meta.json")["league_exclude"])
         finally:
             pub.close()
             league.close()

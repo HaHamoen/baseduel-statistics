@@ -39,6 +39,8 @@ interface Props {
   /** Step after each point: the score holds until the next round ends it. */
   step?: boolean;
   yMax: number;
+  /** The axis's foot: 0 unless a measure lives far from it (a rating). */
+  yMin?: number;
   yTicks: number[];
   yFmt: (v: number) => string;
   xTicks: number[];
@@ -70,7 +72,8 @@ export function LineChart(p: Props) {
   const pw = width - M.left - (p.reference ? M.right + 36 : M.right);
   const ph = height - M.top - M.bottom;
   const x = (i: number) => M.left + (p.xs <= 1 ? pw / 2 : (i / (p.xs - 1)) * pw);
-  const y = (v: number) => M.top + (1 - v / (p.yMax || 1)) * ph;
+  const lo = p.yMin ?? 0;
+  const y = (v: number) => M.top + (1 - (v - lo) / (p.yMax - lo || 1)) * ph;
 
   const path = (vals: (number | null)[], dy = 0) => {
     let d = "";
@@ -264,6 +267,19 @@ export function BarChart(p: BarProps) {
       {tip && <TipBox tip={tip} style={flip ? { right: `${width - x(hover!) + bw / 2 + 10}px` } : { left: `${tipLeft}px` }} />}
     </div>
   );
+}
+
+/** Clean axis steps around a range that does not start at 0. */
+export function niceRange(lo: number, hi: number, count = 4): { min: number; max: number; ticks: number[] } {
+  if (hi <= lo) { lo -= 1; hi += 1; }
+  const raw = (hi - lo) / count;
+  const mag = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw)!;
+  const min = Math.floor(lo / step + 1e-9) * step;
+  const max = Math.ceil(hi / step - 1e-9) * step;
+  const ticks: number[] = [];
+  for (let t = min; t <= max + 1e-9; t += step) ticks.push(Number(t.toFixed(10)));
+  return { min, max, ticks };
 }
 
 /** Clean axis steps: 0 up to a round number at or above the top value. */

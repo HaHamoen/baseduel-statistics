@@ -205,6 +205,41 @@ class TestHistory(ExportCase):
                for p in rows(self.load("players.json"))}
         self.assertEqual(got, {"Ann": (300, None), "Bob": (m, lm)})
 
+    def test_a_league_match_nobody_won_is_only_in_the_matches_list(self):
+        # The user, 2026-11-06: in the league, a match with no result counts
+        # nowhere; its page and the matches list keep it, as !bdrecent does.
+        stopped = self.league.match(mode="scrim", score=(1, 1), winner=None,
+                                    outcome="aborted")
+        self.league.player(stopped, "Ann", 0, False, kills=4)
+        self.league.player(stopped, "Cy", 1, False)
+        self.league.round(stopped, 1, 0, base_num=3)
+        won = self.league.match(mode="scrim")
+        self.league.player(won, "Ann", 0, True, kills=2)
+        self.league.round(won, 1, 0, base_num=5)
+        self.run_export()
+        ann = self.player("Ann")["league"]
+        self.assertEqual([h["id"] for h in rows(ann["matches"])], [won])
+        self.assertEqual(ann["careers"]["all"]["kills"], 2)
+        cy = self.player("Cy")
+        self.assertEqual((rows(cy["league"]["matches"]), cy["league"]["careers"]["all"]),
+                         ([], None))
+        index = {p["name"]: p for p in rows(self.load("players.json"))}
+        self.assertEqual((index["Ann"]["league_played"], index["Ann"]["league_first"]),
+                         (1, won))
+        self.assertEqual([r["base"] for r in rows(self.load("rounds/league.json"))], [5])
+        meta = self.load("meta.json")["sections"]["league"]
+        self.assertEqual((meta["matches"], [r["id"] for r in rows(meta["recent"])],
+                          meta["unfinished"]), (1, [won], False))
+        self.assertEqual(sorted(r["id"] for r in rows(self.load("facts/league.json")["matches"])),
+                         sorted([stopped, won]))
+        self.assertIn(str(stopped), self.load("m/league/0.json"))
+        # The pub keeps its own: listed, and counted on the home page.
+        m = self.pub.match(score=(0, 0), winner=None, outcome="aborted")
+        self.pub.player(m, "Ann", 0, False)
+        self.run_export()
+        self.assertEqual([h["id"] for h in rows(self.player("Ann")["pub"]["matches"])], [m])
+        self.assertTrue(self.load("meta.json")["sections"]["pub"]["unfinished"])
+
 
 class TestPrivacy(ExportCase):
     def test_only_the_bot_list_leaves_the_database(self):
@@ -479,6 +514,48 @@ class TestInsights(ExportCase):
         self.assertEqual(got["play"]["earlier"], {"people": [6, 2, 600.0], "bots": [2, 6, 600.0]})
         self.assertEqual({k: got["hard"][k] for k in ("matches", "decided", "team_won", "team_points", "other_points")},
                          {"matches": 1, "decided": 1, "team_won": 0, "team_points": 1, "other_points": 5})
+
+
+class TestRatings(ExportCase):
+    def test_people_only_decided_matches_own_result_earlier_games_first(self):
+        self.pub.add("bd_player_flags", arena="*", player="Marv1", flag="bot", set_by="Op")
+        self.pub.neobot_game(300, winner=0)
+        self.pub.neobot_player(300, "Ann", 0, True)
+        self.pub.neobot_player(300, "Bob", 1, False)
+        self.pub.neobot_career("Ann", matches=1, wins=1)
+        self.pub.neobot_career("Bob", matches=1)
+        m1 = self.pub.match(winner=0)
+        self.pub.player(m1, "Ann", 0, True)
+        self.pub.player(m1, "Bob", 1, False)
+        self.pub.player(m1, "Marv1", 1, False)               # a bot: never rated
+        self.pub.player(m1, "Cy", 1, False, no_result=1)     # no result: never moves
+        m2 = self.pub.match(winner=None, score=(1, 1), outcome="aborted")
+        self.pub.player(m2, "Ann", 0, False)                 # nobody won: no change
+        self.pub.player(m2, "Bob", 1, False)
+        m3 = self.pub.match(winner=0)
+        self.pub.player(m3, "Ann", 0, False)                 # left a team that won: a loss
+        self.pub.player(m3, "Dee", 0, True)
+        self.pub.player(m3, "Bob", 1, False)
+        self.run_export()
+        board = {r["key"]: r for r in rows(self.load("ratings/pub.json"))}
+        keys = {n: player_key(n) for n in ("Ann", "Bob", "Cy", "Dee", "Marv1")}
+        self.assertEqual(set(board), {keys["Ann"], keys["Bob"], keys["Dee"]})
+        ann = self.player("Ann")["pub"]["rating"]
+        self.assertEqual([h[0] for h in ann["history"]], [300, m1, m3])
+        self.assertEqual((ann["matches"], ann["wins"]), (3, 2))
+        after_wins, after_leaving = ann["history"][1][1], ann["history"][2][1]
+        self.assertGreater(after_wins, ex.ratings.START)
+        self.assertLess(after_leaving, after_wins)
+        self.assertLess(self.player("Bob")["pub"]["rating"]["rating"], ex.ratings.START)
+        self.assertIsNone(self.player("Cy")["pub"]["rating"])
+        self.assertIsNone(self.player("Marv1")["pub"]["rating"])
+        listed = rows(self.load("ratings/pub.json"))
+        values = [r["rating"] for r in listed]
+        self.assertEqual(values, sorted(values, reverse=True))
+        order = [r["key"] for r in listed]
+        for n in ("Ann", "Bob", "Dee"):
+            r = self.player(n)["pub"]["rating"]
+            self.assertEqual((r["rank"], r["of"]), (order.index(keys[n]) + 1, 3))
 
 
 class TestWriter(ExportCase):

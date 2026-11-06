@@ -44,15 +44,21 @@ def board_name(cell):
     return fold(name)
 
 
-def check_history(site_history, bot_boards, board, fail):
+def check_history(site_history, bot_boards, board, fail, unlisted=()):
     """A player's match list draws its own KPM column: for each match, every
     row's KPM is that player's KPM on the match's board. An earlier match's
     list row is the player's whole game, so one who changed freq (two lines
-    on its board) is checked only for being there."""
+    on its board) is checked only for being there. A match in `unlisted` is
+    on nobody's list."""
     kpm_at = {"own": board.SB_COLS.index("KPM") + 1,
               "neobot": board.NEOBOT_COLS.index("KPM") + 1}
     checked = 0
     for key, theirs in bot_boards.items():
+        if key in unlisted:
+            checked += 1
+            if site_history.get(key):
+                fail("%s: nobody won it, yet it is on %r's list" % (key, site_history[key]))
+            continue
         at = kpm_at["neobot" if key.startswith("neobot:") else "own"]
         lines = {}
         for r in theirs:
@@ -140,9 +146,11 @@ def check_bases(site_bases, fail):
             freqs = sorted({r[0] for r in q("SELECT freq FROM bd_match_players WHERE match_id = ?", mid)})
             low[mid] = {"pub": 0, "private": 100}.get(mode, freqs[0] if len(freqs) == 2 else 0)
         want = {}
+        # A league match nobody won is left out (the user, 2026-11-06).
+        done = "" if section == "pub" else " WHERE m.winner_freq IS NOT NULL"
         for mid, arena, base, counted, ended, winner, secs in q(
                 "SELECT r.match_id, m.arena, r.base_num, r.counted, r.ended_by, r.winner_freq, r.duration_s "
-                "FROM bd_rounds r JOIN bd_matches m ON m.id = r.match_id"):
+                "FROM bd_rounds r JOIN bd_matches m ON m.id = r.match_id" + done):
             if mid not in people:
                 continue
             w = want.setdefault((arena or "?", base), dict(rounds=0, decided=0, a=0, b=0, touch=0, wipe=0,
@@ -201,7 +209,11 @@ def check_activity(site_act, fail):
             is_bot = lambda n: any(glob_match(p, n) for p in pats)
             earlier = set()
         people, firsts = {}, {}
-        for mid, name in q("SELECT match_id, player_name FROM bd_match_players"):
+        # A league match nobody won is left out (the user, 2026-11-06), so a
+        # league player's first match is their first that somebody won.
+        done = "" if section == "pub" else " WHERE m.winner_freq IS NOT NULL"
+        for mid, name in q("SELECT p.match_id, p.player_name FROM bd_match_players p "
+                           "JOIN bd_matches m ON m.id = p.match_id" + done):
             firsts[fold(name)] = min(firsts.get(fold(name), mid), mid)
             if not is_bot(name):
                 people.setdefault(mid, set()).add(fold(name))
@@ -352,6 +364,8 @@ def main(argv):
 
     failures, checked = [], 0
     bot_boards = {}
+    # League matches nobody won: on no one's match list (the user, 2026-11-06).
+    unlisted = set()
 
     def fail(msg):
         if len(failures) < 40:
@@ -373,6 +387,8 @@ def main(argv):
                 theirs = board_rows(board.scoreboard_items(
                     players, m["winner_freq"], m["played_seconds"], names))
                 bot_boards["%s:%s" % (section, mid)] = theirs
+                if section == "league" and m["winner_freq"] is None:
+                    unlisted.add("%s:%s" % (section, mid))
                 got = site["boards"]["%s:%s" % (section, mid)]
                 checked += 1
                 if site_rows(got["rows"]) != theirs:
@@ -421,7 +437,7 @@ def main(argv):
     checked += check_activity(site["activity"], fail)
 
     # ---- every player's match list: its KPM is the board's ----
-    checked += check_history(site["history"], bot_boards, board, fail)
+    checked += check_history(site["history"], bot_boards, board, fail, unlisted)
 
     # ---- the compare page's head to head equals the teammates and rivals
     # lines, worked out apart (exporter/mates.py from the rosters, which

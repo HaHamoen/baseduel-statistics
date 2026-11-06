@@ -16,7 +16,7 @@ import json
 import os
 import time
 
-from exporter import insights, mates, readers, records
+from exporter import insights, mates, ratings, readers, records
 from exporter.rules import (
     CAREER_KEYS, LEAGUE_SCOPES, NEOBOT_UNTRACKED_STATS, PUB_SCOPES, TOP_STATS,
     fold, freqs_of, glob_match, match_seconds, player_key, result,
@@ -176,10 +176,16 @@ class Section:
     """One bot's database, read once."""
 
     def __init__(self, name, conn, scopes, is_bot, replays=None,
-                 replay_site=None):
+                 replay_site=None, unfinished=True):
         self.name = name
         self.scopes = scopes
         self.is_bot = is_bot
+        # Whether a match nobody won is shown beyond the matches list and its
+        # own page. The league's are not (the user, 2026-11-06): a stopped or
+        # abandoned league match is in no history, count or base. The
+        # careers, boards, records and ratings of both sections already
+        # leave such matches out, as the bots do.
+        self.unfinished = unfinished
         self.matches = readers.own_matches(conn)
         self.match_by_id = {m["id"]: m for m in self.matches}
         self.players = readers.own_players(conn)
@@ -227,6 +233,10 @@ class Section:
                     self.replay[m["id"]] = "%s/r/%s" % (
                         replay_site.rstrip("/"), replays[rid.lower()])
 
+    def counts(self, m):
+        """Whether a match is in histories, counts and bases."""
+        return self.unfinished or m["winner_freq"] is not None
+
     def last_seen(self):
         """{folded name: (latest ended_at, casing then)}: get_known_players'
         casing, the one of their latest match."""
@@ -244,6 +254,8 @@ class Section:
         out = []
         for p in self.players_by_lname.get(lname, ()):
             m = self.match_by_id[p["match_id"]]
+            if not self.counts(m):
+                continue
             fa, _fb = freqs_of(m["mode"], self.players_by_match[m["id"]])
             mine, theirs = ((m["score_a"], m["score_b"]) if p["freq"] == fa
                             else (m["score_b"], m["score_a"]))
@@ -312,7 +324,7 @@ def round_facts(section):
     people, _earlier = records.with_people(section)
     out = []
     for m in section.matches:
-        if m["id"] not in people:
+        if m["id"] not in people or not section.counts(m):
             continue
         fa, _fb = freqs_of(m["mode"], section.players_by_match.get(m["id"], []))
         for r in section.rounds_by_match.get(m["id"], []):
@@ -350,7 +362,8 @@ def export(pub_conn, league_conn, out, league_exclude=(), replays=None,
     pub = Section("pub", pub_conn, PUB_SCOPES, lambda l: l in pub_bots)
     league = Section("league", league_conn, LEAGUE_SCOPES,
                      lambda l: any(glob_match(p, l) for p in league_exclude),
-                     replays=replays, replay_site=replay_site)
+                     replays=replays, replay_site=replay_site,
+                     unfinished=False)
     w = Writer(out)
 
     # ---- who is who ---------------------------------------------------------
@@ -368,6 +381,11 @@ def export(pub_conn, league_conn, out, league_exclude=(), replays=None,
         if key in keys.values():
             raise ExportError("two players share the key %s" % key)
         keys[lname] = key
+
+    # ---- ratings: every decided match replayed in order (ratings.py) -------
+    rated = {sec.name: ratings.rate(sec) for sec in (pub, league)}
+    rank_of = {name: {l: i + 1 for i, l in enumerate(ratings.ranked(r))}
+               for name, r in rated.items()}
 
     # ---- each player ---------------------------------------------------------
     games = {g["neobot_id"]: g for g in pub.neobot_matches}
@@ -391,17 +409,23 @@ def export(pub_conn, league_conn, out, league_exclude=(), replays=None,
                           "matches": table(own, HISTORY_COLS),
                           "neobot": table(old, NEOBOT_HISTORY_COLS),
                           "mates": mates.mates(pub, lname, keys, old,
-                                               players_by_game)}
+                                               players_by_game),
+                          "rating": ratings.player(rated["pub"], rank_of["pub"],
+                                                   lname)}
         league_careers = {s: career(league.careers[s].get(lname))
                           for s in LEAGUE_SCOPES}
         theirs = league.history(lname)
-        if theirs or any(league_careers.values()):
+        # Everyone the league bot knows has a league section, even one who
+        # played only in a match nobody won (check_names).
+        if theirs or any(league_careers.values()) or lname in league_seen:
             doc["league"] = {"name": league_seen[lname][1]
                              if lname in league_seen else name,
                              "bot": league.is_bot(lname),
                              "careers": league_careers,
                              "matches": table(theirs, HISTORY_COLS),
-                             "mates": mates.mates(league, lname, keys)}
+                             "mates": mates.mates(league, lname, keys),
+                             "rating": ratings.player(rated["league"],
+                                                      rank_of["league"], lname)}
         w.json("p/%s.json" % keys[lname], doc)
         pc, lc = pub_careers["all"], league_careers["all"]
         index.append({
@@ -433,6 +457,8 @@ def export(pub_conn, league_conn, out, league_exclude=(), replays=None,
         w.json("records/%s.json" % section.name,
                records.section_records(section, keys))
         w.json("rounds/%s.json" % section.name, round_facts(section))
+        w.json("ratings/%s.json" % section.name,
+               ratings.board(rated[section.name], keys))
     w.json("insights.json", insights.insights(pub, league))
 
     # Each earlier game's page, a bucket of games at a time, each written as
@@ -472,12 +498,14 @@ def export(pub_conn, league_conn, out, league_exclude=(), replays=None,
     # ---- what the site needs to know about all of it --------------------------
     def summary(section):
         ms = section.matches
+        shown = [m for m in ms if section.counts(m)]
         # The latest few, newest first, as the facts file has them: the home
         # page lists them without loading the whole file.
-        recent = sorted(ms, key=lambda m: (m.get("ended_at") or
-                                           m.get("started_at") or 0, m["id"]),
+        recent = sorted(shown, key=lambda m: (m.get("ended_at") or
+                                              m.get("started_at") or 0, m["id"]),
                         reverse=True)[:RECENT]
-        return {"matches": len(ms),
+        return {"matches": len(shown),
+                "unfinished": section.unfinished,
                 # When the bot's record begins: the site calls Neobot's games
                 # "earlier matches", from before this (the user, 2026-11-05).
                 "first_started": min((m["started_at"] for m in ms

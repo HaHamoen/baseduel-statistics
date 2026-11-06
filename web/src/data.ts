@@ -21,8 +21,12 @@ export interface Meta {
   version: number;
   built: number;
   sections: Record<Section, {
+    /** Matches the site counts: the league's leave out those nobody won. */
     matches: number; first_started: number | null; first_id: number | null; last_id: number | null;
     last_ended: number | null; bucket: number; recent: Table;
+    /** Whether a match nobody won counts beyond the matches list: false for
+     * the league (exporter/export.py Section.unfinished). */
+    unfinished: boolean;
   }>;
   neobot: { games: number; first_id: number; last_id: number; bucket: number } | null;
   players: number;
@@ -128,8 +132,23 @@ export interface PlayerSection {
   /** exporter/mates.py: by the page's buttons, the people played most with
    * and against, as [key, matches, wins, losses], most matches first. */
   mates?: Record<string, { with: MateRow[]; against: MateRow[] }>;
+  /** exporter/ratings.py: over every decided match of the section, people
+   * only; null for a bot or a player with no win or loss. */
+  rating?: PlayerRating | null;
 }
 export type MateRow = [string, number, number, number];
+
+export interface PlayerRating {
+  rating: number;
+  rank: number;
+  of: number;
+  matches: number;
+  wins: number;
+  /** Where everyone starts. */
+  start: number;
+  /** [match id, the rating after it], in the order played. */
+  history: [number, number][];
+}
 
 export interface PlayerDoc {
   key: string;
@@ -377,6 +396,11 @@ export interface RecordsDoc {
 }
 export const getRecords = (section: Section) => load<RecordsDoc>(`records/${section}.json`);
 export const getFacts = (section: Section) => load<Facts>(`facts/${section}.json`);
+/** ratings/<section>.json: everyone rated, best first. */
+export interface RatingBoard extends Table {
+  start: number;
+}
+export const getRatings = (section: Section) => load<RatingBoard>(`ratings/${section}.json`);
 export const getNeobotIndex = () => load<Table>("neobot/index.json");
 
 export async function getMatch(section: Section, id: number): Promise<MatchDoc | null> {

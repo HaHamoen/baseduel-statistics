@@ -39,16 +39,17 @@ export interface ActMatch {
   people: string[];
 }
 
-/** Every dated match a person played in, oldest first. */
-export function peopleMatches(facts: Facts, isBot: (key: string) => boolean): ActMatch[] {
+/** Every dated match a person played in, oldest first. With `unfinished`
+ * false (the league), only matches somebody won. */
+export function peopleMatches(facts: Facts, isBot: (key: string) => boolean, unfinished = true): ActMatch[] {
   const people = new Map<number, Set<string>>();
   for (const p of rows<{ match_id: number; key: string }>(facts.players)) {
     if (isBot(p.key)) continue;
     if (!people.has(p.match_id)) people.set(p.match_id, new Set());
     people.get(p.match_id)!.add(p.key);
   }
-  return rows<{ id: number; started_at: number | null; played_seconds: number }>(facts.matches)
-    .filter((m) => m.started_at != null && people.has(m.id))
+  return rows<{ id: number; started_at: number | null; played_seconds: number; winner_freq: number | null }>(facts.matches)
+    .filter((m) => m.started_at != null && people.has(m.id) && (unfinished || m.winner_freq != null))
     .map((m) => ({ id: m.id, at: m.started_at!, seconds: m.played_seconds, people: [...people.get(m.id)!] }))
     .sort((a, b) => a.at - b.at || a.id - b.id);
 }

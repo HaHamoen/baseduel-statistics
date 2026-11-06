@@ -6,9 +6,10 @@
 #
 #   tools/refresh.sh [preview|main]      preview by default
 #
-# A change is anything in the data, the site's code or the deploy script newer
-# than the last deploy to that branch (.deployed-<branch>, touched only after
-# a deploy succeeds), so a deploy that failed is tried again on the next run.
+# A change is anything in the data, the exporter, the site's code or the
+# deploy script newer than the last deploy to that branch (.deployed-<branch>,
+# touched only after a deploy succeeds), so a deploy that failed is tried
+# again on the next run, and pulled code goes up without waiting for a match.
 # DRY_RUN=1 does everything but the deploy.
 #
 # Where the databases are, and which league names are bots:
@@ -39,7 +40,7 @@ started=$(date +%s)
 marker=".deployed-$branch"
 newer() {
   find web/public/data web/src web/index.html web/public/_headers web/package.json \
-    tools/deploy.sh -newer "$marker" -print -quit
+    tools/deploy.sh exporter -newer "$marker" -print -quit
 }
 
 # Most runs fall between matches, when nothing has been written: those stop

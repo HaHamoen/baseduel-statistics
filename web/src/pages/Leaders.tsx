@@ -1,5 +1,5 @@
 import { useMemo, useState } from "preact/hooks";
-import { getFacts, getMeta, getPlayers, load, type Section, type Table } from "../data";
+import { getFacts, getMeta, getPlayers, getRatings, load, rows, type Section, type Table } from "../data";
 import { leaderboard, SCOPES, STATS, type Stat } from "../leaderboard";
 import { date, num, pyFixed, pyRound } from "../format";
 import { navigate, playerHref } from "../router";
@@ -11,8 +11,12 @@ const SCOPE_OPTIONS: Record<Section, [string, string][]> = {
   pub: [["all", "All"], ["pub_all", "Pub"], ["private", "Private"], ["hard", "Hard mode"]],
   league: [["all", "All"], ["league", "League"], ["scrim", "Scrim"], ["pickup", "Pickup"]],
 };
-const STAT_ORDER: Stat[] = ["kills", "kd", "kpm", "dmg", "dpm", "winpct", "wins", "matches",
+/** A rating is not a !bdtop board: one number over every match, worked out
+ * by the exporter (ratings.py), so none of the filters apply to it. */
+type Board = Stat | "rating";
+const STAT_ORDER: Board[] = ["rating", "kills", "kd", "kpm", "dmg", "dpm", "winpct", "wins", "matches",
   "deaths", "touches", "streak", "tk"];
+const BOARD_LABEL = (b: Board) => (b === "rating" ? "Rating" : STATS[b].label);
 const TIMES: [string, string][] = [["all", "All time"], ["30", "Last 30 days"], ["7", "Last 7 days"]];
 /** A higher bar than the bot's own minimum, for a board without the
  * two-match players at the top. The bot's is the default. */
@@ -35,7 +39,8 @@ export function Leaders({ query }: { query: URLSearchParams }) {
   const section: Section = query.get("s") === "league" ? "league" : "pub";
   const scopes = SCOPE_OPTIONS[section];
   const scope = scopes.some(([v]) => v === query.get("scope")) ? query.get("scope")! : "all";
-  const stat = (STAT_ORDER as string[]).includes(query.get("stat") || "") ? query.get("stat") as Stat : "kills";
+  const stat = (STAT_ORDER as string[]).includes(query.get("stat") || "") ? query.get("stat") as Board : "kills";
+  const rated = stat === "rating";
   const time = TIMES.some(([v]) => v === query.get("t")) ? query.get("t")! : "all";
   const bots = query.get("bots") === "1";
   const atLeast = MINIMUMS.includes(Number(query.get("min"))) ? Number(query.get("min")) : 0;
@@ -48,13 +53,14 @@ export function Leaders({ query }: { query: URLSearchParams }) {
   };
 
   const [got, error] = useLoad(() => Promise.all([
-    getFacts(section), section === "pub" ? load<Table>("neobot/careers.json") : Promise.resolve(null),
+    rated ? Promise.resolve(null) : getFacts(section),
+    !rated && section === "pub" ? load<Table>("neobot/careers.json") : Promise.resolve(null),
     getPlayers(), getMeta(),
-  ]), [section]);
+  ]), [section, rated]);
   const [page, setPage] = useState(0);
 
   const board = useMemo(() => {
-    if (!got) return null;
+    if (!got || stat === "rating") return null;
     const [facts, earlier, players] = got;
     if (!facts) return null;
     const flag = section === "pub" ? "pub_bot" : "league_bot";
@@ -71,6 +77,7 @@ export function Leaders({ query }: { query: URLSearchParams }) {
       <div class="filters">
         <Pills label="Section" value={section} onChange={(s) => { setPage(0); navigate(`/top?s=${s}&stat=${stat}`, true); }}
                options={[["pub", "Pub arena"], ["league", "League"]]} />
+        {!rated && <>
         <Pills label="Which matches" value={scope} onChange={(v) => { setPage(0); set({ scope: v }); }} options={scopes} />
         <Pills label="When" value={time} onChange={(v) => { setPage(0); set({ t: v }); }} options={TIMES} />
         <label>At least{" "}
@@ -83,17 +90,19 @@ export function Leaders({ query }: { query: URLSearchParams }) {
           <input type="checkbox" checked={bots} onChange={(e) => { setPage(0); set({ bots: (e.target as HTMLInputElement).checked ? "1" : "0" }); }} />
           {" "}Show bots
         </label>
+        </>}
       </div>
       <div class="filters">
         <span class="muted small">Rank by</span>
         <Pills label="Rank by" value={stat} onChange={(v) => { setPage(0); set({ stat: v }); }}
-               options={STAT_ORDER.map((s) => [s, STATS[s].label] as [Stat, string])} />
+               options={STAT_ORDER.map((s) => [s, BOARD_LABEL(s)] as [Board, string])} />
       </div>
     </header>
   );
+  if (rated) return <>{head}<RatingBoardView section={section} page={page} setPage={setPage} /></>;
   if (!got || !board) return <>{head}<Loading /></>;
   const [, , players, meta] = got;
-  const { label, min, floor } = STATS[stat];
+  const { label, min, floor } = STATS[stat as Stat];
   const first = meta?.sections.pub.first_started;
   const ranked = atLeast ? board.rows.filter((r) => r.matches >= atLeast) : board.rows;
   const top = ranked[0]?.value || 0;
@@ -137,7 +146,7 @@ export function Leaders({ query }: { query: URLSearchParams }) {
                         {bots && p && (section === "pub" ? p.pub_bot : p.league_bot) && <span class="tag" style="margin-left:6px">bot</span>}
                       </td>
                       <td class="lb-value">
-                        <strong>{show(stat, r.value)}</strong>
+                        <strong>{show(stat as Stat, r.value)}</strong>
                         <span class="lb-bar" style={{ width: `${top > 0 ? Math.max(1, (r.value / top) * 100) : 0}%` }} />
                       </td>
                       {cols.matches && <td class="n">{num(r.matches)}</td>}
@@ -154,5 +163,56 @@ export function Leaders({ query }: { query: URLSearchParams }) {
         <Pager page={page} pages={pages} onPage={setPage} />
       </section>
     </>
+  );
+}
+
+interface RatingRow { key: string; rating: number; matches: number; wins: number }
+
+/** Everyone rated in the section, best first (exporter/ratings.py). */
+function RatingBoardView({ section, page, setPage }: { section: Section; page: number; setPage: (p: number) => void }) {
+  const [got, error] = useLoad(() => Promise.all([getRatings(section), getPlayers()]), [section]);
+  if (error) return <Problem error={error} />;
+  if (!got) return <Loading />;
+  const [doc, players] = got;
+  const list = doc ? rows<RatingRow>(doc) : [];
+  const pages = Math.ceil(list.length / PAGE);
+  const which = section === "pub" ? "pub and private" : "league";
+  return (
+    <section class="card">
+      <p class="muted small">{num(list.length)} rated · every {which} match with a win or a loss · people only</p>
+      {list.length === 0 ? <p class="muted">Nobody is rated yet.</p> : (
+        <div class="scroll">
+          <table class="data">
+            <thead><tr>
+              <th scope="col" class="n">#</th><th scope="col">Player</th>
+              <th scope="col" class="n">Rating</th>
+              <th scope="col" class="n" title="Matches with a win or a loss">Rated</th>
+              <th scope="col" class="n" title="Matches won">Won</th>
+              <th scope="col" class="n" title="Wins over rated matches">Win%</th>
+            </tr></thead>
+            <tbody>
+              {list.slice(page * PAGE, page * PAGE + PAGE).map((r, i) => {
+                const p = players.byKey.get(r.key);
+                return (
+                  <tr>
+                    <td class="n rank">{page * PAGE + i + 1}</td>
+                    <td class="nowrap"><a href={playerHref(p?.name || r.key)}>{p?.name || r.key}</a></td>
+                    <td class="n"><strong>{num(r.rating)}</strong></td>
+                    <td class="n">{num(r.matches)}</td>
+                    <td class="n">{num(r.wins)}</td>
+                    <td class="n">{pyRound((r.wins * 100.0) / r.matches)}%</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <Pager page={page} pages={pages} onPage={setPage} />
+      <p class="note">Every {which} match somebody won is replayed in the order played, earlier matches first, and each
+        player moves by their own win or loss: more for beating a stronger team. Bots are not rated, and a no result
+        moves nobody. Everyone starts at {num(doc?.start ?? 1500)}. The number is a cautious one, so a few lucky
+        wins cannot put a newcomer on top; it firms up with every match.</p>
+    </section>
   );
 }

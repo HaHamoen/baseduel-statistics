@@ -133,11 +133,13 @@ for (const section of ["pub", "league"]) {
 // week up to the export, the hour-of-the-week grid, and the last 7 days.
 result.activity = {};
 {
-  const built = load("meta.json").built;
+  const meta = load("meta.json");
+  const built = meta.built;
   for (const section of ["pub", "league"]) {
     const flag = section === "pub" ? "pub_bot" : "league_bot";
     const col = section === "pub" ? "pub_first" : "league_first";
-    const ms = site.peopleMatches(load(`facts/${section}.json`), (k) => !!index.get(k)?.[flag]);
+    const ms = site.peopleMatches(load(`facts/${section}.json`), (k) => !!index.get(k)?.[flag],
+                                  meta.sections[section].unfinished);
     const first = (k) => index.get(k)?.[col] ?? null;
     const now = Math.max(built, ms[ms.length - 1].at);
     result.activity[section] = {

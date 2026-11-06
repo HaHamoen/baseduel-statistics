@@ -36,7 +36,7 @@ export function Activity({ query }: { query: URLSearchParams }) {
     const [facts, players, meta] = got;
     const flag = section === "pub" ? "pub_bot" : "league_bot";
     const firstCol = section === "pub" ? "pub_first" : "league_first";
-    const ms = peopleMatches(facts, (k) => !!players.byKey.get(k)?.[flag]);
+    const ms = peopleMatches(facts, (k) => !!players.byKey.get(k)?.[flag], meta?.sections[section].unfinished ?? true);
     if (!ms.length) return null;
     const first = (k: string) => players.byKey.get(k)?.[firstCol] ?? null;
     // "Now" is when the data was exported: the last 7 days, and the days
@@ -124,7 +124,7 @@ export function Activity({ query }: { query: URLSearchParams }) {
         <p class="note">Weeks start on Monday. New: people playing their first {section === "pub" ? "pub" : "league"} match. Played: time played, as each match's clock has it.
           {section === "league" ? ` The league began on ${date(began)}, so everyone in its first week is new.` : ""}</p>
       </section>
-      <p class="note">Every match a person played in; matches of bots alone are left out.
+      <p class="note">Every match a person played in; matches of bots alone are left out{section === "league" ? ", and so are league matches nobody won" : ""}.
         {section === "pub" && began ? ` Matches before ${date(began)} recorded no dates, so they are not here, and a player who played one is not new.` : ""}</p>
     </>
   );
