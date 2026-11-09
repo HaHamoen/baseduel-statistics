@@ -16,6 +16,9 @@ Base control (check_control) needs CONTROL_DIR, web/tools/control.mjs's
 output; REPLAYS_DATA, the replay folder, adds the cross-check against
 ss-replay's own Python analysis where $BD_STATS_SSREPLAY / ~/ss-replay has it.
 tools/check.sh sets both when given REPLAYS_DATA.
+
+Chat (check_chat) needs REPLAYS_DATA: every league match page's chat against
+its replay, read here whole, apart from web/tools/chat.mjs.
 """
 import json
 import os
@@ -190,6 +193,138 @@ def js_round(x):
     """JavaScript's Math.round: halves up, as the replay's Held cell rounds."""
     import math
     return math.floor(x + 0.5)
+
+
+CHAT_HOW = {"wipe": "Wipe", "timeout": "Time ran out", "nextbase": "Skipped (!nextbase)",
+            "hold": "Timeout called", "setscore": "Score set by an official",
+            "restart": "Restarted", "abort": "Match ended"}
+CHAT_COMMAND = re.compile(r"[!.?*]{1,2}[A-Za-z]")
+
+
+def chat_expected(rdoc, rows_by_seq):
+    """A league match page's chat as it should read, from the replay itself
+    (the whole document, json.load: none of chat.mjs's reading) and its
+    bd_rounds rows: lines in event order; the rounds from the markers (a
+    roundStart opens one, the next marker of its round and attempt closes
+    it; its seq is the bot's round starting within 300 ticks with the same
+    round and attempt); a line at a round's end tick after its end; a gap's
+    label only over lines."""
+    names = {p["id"]: p["name"] for p in rdoc["players"]}
+    lines = [(e["t"], names.get(e["player"]) if e["player"] is not None else None,
+              e["chatType"] == 3, bool(CHAT_COMMAND.match(e["text"])), e["text"])
+             for e in rdoc["events"] if e["type"] == "chat"]
+    rounds = []
+    for k in rdoc.get("markers") or ():
+        d = k["detail"]
+        if k["kind"] == "roundStart":
+            rounds.append({"round": d["round"], "attempt": d["attempt"], "base": d["base"],
+                           "start": k["t"], "end": None})
+        elif rounds and rounds[-1]["end"] is None and \
+                (d["round"], d["attempt"]) == (rounds[-1]["round"], rounds[-1]["attempt"]):
+            rounds[-1]["end"] = k["t"]
+    for r in rounds:
+        r["seq"] = next((b["seq"] for b in (rdoc.get("botStats") or {}).get("rounds", ())
+                         if b["t0"] is not None and abs(b["t0"] - r["start"]) < 300
+                         and (b["round"], b["attempt"]) == (r["round"], r["attempt"])), None)
+    out, at = [], 0
+
+    def said(until, label=None):
+        nonlocal at
+        head = label
+        while at < len(lines) and (until is None or lines[at][0] < until):
+            if head:
+                out.append(("gap", head))
+                head = None
+            out.append(("line",) + lines[at])
+            at += 1
+
+    said(rounds[0]["start"] if rounds else None,
+         "Before round %d" % rounds[0]["round"] if rounds and rounds[0]["round"] > 1 else None)
+    for i, r in enumerate(rounds):
+        nxt = rounds[i + 1] if i + 1 < len(rounds) else None
+        out.append(("round", r["start"], r["round"], r["attempt"], r["base"]))
+        said(r["end"] if r["end"] is not None else nxt and nxt["start"])
+        if r["end"] is None:
+            continue
+        row = rows_by_seq.get(r["seq"])
+        if row:
+            how = (("Touch by %s" % row["scorer_name"] if row["scorer_name"] else "Touch")
+                   if row["ended_by"] == "touch" else CHAT_HOW.get(row["ended_by"], row["ended_by"]))
+            out.append(("end", r["end"], row["seq"], row["winner_freq"],
+                        (row["score_a"], row["score_b"]), how))
+        said(nxt["start"] if nxt else None,
+             "After the whistle" if nxt is None else
+             "Timeout" if row and row["ended_by"] == "hold" else "Between rounds")
+    return out, lines
+
+
+def site_chat_items(items):
+    """cells.mjs's chatTimeline items as the tuples chat_expected builds."""
+    out = []
+    for it in items:
+        k = it["kind"]
+        if k == "round":
+            out.append((k, it["t"], it["round"], it["attempt"], it["base"]))
+        elif k == "gap":
+            out.append((k, it["label"]))
+        elif k == "line":
+            out.append((k, it["t"], it["name"], it["spec"], it["cmd"], it["text"]))
+        else:
+            out.append((k, it["t"], it["seq"], it["winner"], tuple(it["score"]), it["how"]))
+    return out
+
+
+def check_chat(site_chat, replays_data, fail):
+    """The chat on every league match page with a replay against that replay,
+    read here apart from web/tools/chat.mjs, and the match's bd_rounds rows:
+    every item of the site's own chatTimeline (cells.mjs), in order; each
+    match's line count and spectator count; and no page with chat that has no
+    replay behind it. Skipped without REPLAYS_DATA."""
+    import gzip
+    sys.path.insert(0, ROOT)
+    from exporter.snapshot import open_snapshot
+    if not replays_data:
+        print("SKIP chat: no REPLAYS_DATA")
+        return 0
+    conn = open_snapshot(os.path.join(ROOT, ".snap", "baseduel.db"))
+    match_of = {("%s-%s" % (a, r)).lower(): mid for mid, a, r in conn.execute(
+        "SELECT id, arena, recording FROM bd_matches WHERE recording IS NOT NULL")}
+    checked, behind = 0, set()
+    for e in load(replays_data, "index.json"):
+        mid = match_of.get(e["id"].lower())
+        if mid is None or not e.get("match") or not e.get("replay"):
+            continue
+        with gzip.open(os.path.join(replays_data, e["replay"])) as f:
+            rdoc = json.load(f)
+        cur = conn.execute("SELECT seq, winner_freq, score_a, score_b, ended_by, scorer_name "
+                           "FROM bd_rounds WHERE match_id = ?", (mid,))
+        cols = [c[0] for c in cur.description]
+        rows_by_seq = {r[0]: dict(zip(cols, r)) for r in cur}
+        want, lines = chat_expected(rdoc, rows_by_seq)
+        del rdoc
+        if not lines:
+            if str(mid) in site_chat:
+                fail("chat %s: match %s shows chat its replay does not hold" % (e["id"], mid))
+            continue
+        behind.add(str(mid))
+        got = site_chat_items(site_chat.get(str(mid), ()))
+        checked += len(want)
+        if got != want:
+            at = next((i for i, (a, b) in enumerate(zip(got, want)) if a != b), min(len(got), len(want)))
+            fail("chat %s (match %s): item %d of %d/%d: site %r, replay %r"
+                 % (e["id"], mid, at, len(got), len(want),
+                    got[at] if at < len(got) else None, want[at] if at < len(want) else None))
+        n = sum(1 for g in got if g[0] == "line")
+        spec = sum(1 for g in got if g[0] == "line" and g[3])
+        if (n, spec) != (len(lines), sum(1 for x in lines if x[2])):
+            fail("chat %s: %d lines (%d spectators) shown, the replay has %d (%d)"
+                 % (e["id"], n, spec, len(lines), sum(1 for x in lines if x[2])))
+    for mid in site_chat:
+        if mid not in behind:
+            fail("chat: match %s has chat and no replay behind it" % mid)
+    conn.close()
+    print("chat: %d matches, %d items" % (len(behind), checked))
+    return checked
 
 
 def check_control(data, control_dir, replays_data, fail):
@@ -543,6 +678,9 @@ def main(argv):
     # ---- base control on league match pages, from their replays ----
     checked += check_control(data, os.environ.get("CONTROL_DIR"),
                              os.environ.get("REPLAYS_DATA"), fail)
+
+    # ---- chat on league match pages, from their replays ----
+    checked += check_chat(site["chat"], os.environ.get("REPLAYS_DATA"), fail)
 
     # ---- the activity page ----
     checked += check_activity(site["activity"], fail)

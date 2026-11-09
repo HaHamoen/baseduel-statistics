@@ -5,9 +5,10 @@ import {
   ownBoard, roundHow, roundLabel, SB_COLS, SB_GROUPS, type Cell, type ColGroup,
 } from "../board";
 import {
-  getMatch, getMeta, getNeobotMatch, isNeobotId, rows, type ControlRound, type MatchDoc, type NeobotDoc,
+  getMatch, getMeta, getNeobotMatch, isNeobotId, rows, type ChatDoc, type ControlRound, type MatchDoc, type NeobotDoc,
   type NeobotLineRow, type NeobotPlayerRow, type PlayerRow, type RoundRow, type Section,
 } from "../data";
+import { chatCounts, chatTimeline } from "../chat";
 import { dateTime, duration, num } from "../format";
 import { freqsOf, kindLabel, modeLine, outcomeWord, teamNames } from "../matchinfo";
 import { playerHref } from "../router";
@@ -104,6 +105,7 @@ function OwnMatch({ section, doc }: { section: Section; doc: MatchDoc }) {
       )}
       {players.length > 0 && <Highlights records={players} />}
       <Rounds rounds={rounds} names={names} fa={fa} roundPlayers={roundPlayers} control={doc.control?.rounds} />
+      {doc.chat && <Chat chat={doc.chat} rounds={rounds} names={names} fa={fa} replay={m.replay} />}
     </>
   );
 }
@@ -452,6 +454,64 @@ function ControlChart({ rounds, control, names, fa }: {
       <p class="chart-note">The share of the base each team reached first, once a second, as the replay counts it.
         Above the middle line {A} held more, below it {B}.</p>
     </div>
+  );
+}
+
+/** The match's chat from its replay, as it was said between the rounds:
+ * public chat and the spectators' team chat (the only team chat a recording
+ * keeps), yellow as the game shows team chat; commands dimmed. Names are never
+ * in a team's colour, only the team a point went to (the user, 2026-11-08:
+ * chat lines tell apart only public and spectator chat). A timeout's line
+ * names no team: neither the database nor the replay says who called it. Open from the start (the user,
+ * 2026-11-08), in a box of its own height; the summary folds it away. A time
+ * opens the replay at that moment. */
+function Chat({ chat, rounds, names, fa, replay }: {
+  chat: ChatDoc; rounds: RoundRow[]; names: Map<number, string>; fa: number; replay: string | null;
+}) {
+  const items = chatTimeline(chat, rounds);
+  const { total, pub, spec } = chatCounts(chat);
+  const team = (f: number) => <Team side={f === fa ? "a" : "b"}>{names.get(f) || `Freq ${f}`}</Team>;
+  // the replay's own link form for a moment: seconds to a tenth (main.ts linkSeconds)
+  const at = (t: number) => (
+    replay ? <a class="chat-t" href={`${replay}?t=${Math.round(t / 10) / 10}`} target="_blank" rel="noopener"
+                title="Watch from here in the replay">{duration(t / 100)}</a>
+      : <span class="chat-t">{duration(t / 100)}</span>
+  );
+  return (
+    <section class="card">
+      <h2>Chat</h2>
+      <details class="chat-fold" open>
+        <summary>{num(total)} {total === 1 ? "line" : "lines"} · {num(pub)} public, {num(spec)} from spectators</summary>
+        <p class="chart-note">Public chat and the spectators' team chat, in yellow as the game shows it, as the
+          recording kept them; private messages and the teams' own chat are never recorded. Times count from
+          the start of the recording{replay ? "; a time opens the replay there" : ""}.</p>
+        <ol class="chat-log">
+          {items.map((it) => {
+            switch (it.kind) {
+              case "round":
+                return <li class="chat-round"><span class="chat-t">{duration(it.t / 100)}</span>
+                  <span>Round {it.round}{it.attempt > 1 ? `, attempt ${it.attempt}` : ""} · base {it.base}</span></li>;
+              case "gap":
+                return <li class="chat-gap">{it.label}</li>;
+              case "end":
+                return <li class="chat-end"><span class="chat-t">{duration(it.t / 100)}</span>
+                  <span>{it.winner != null ? <>Point {team(it.winner)} · {it.score[0]}–{it.score[1]} · {it.how}</> : it.how}</span></li>;
+              case "line":
+                return (
+                  <li class={`chat-line${it.spec ? " spec" : ""}${it.cmd ? " cmd" : ""}`}>
+                    {at(it.t)}
+                    <span class="chat-msg">
+                      {it.spec && <span class="sr-only">Spectators: </span>}
+                      {it.name != null && <b class="chat-who">{it.name}&gt;</b>}{" "}
+                      {it.text}
+                    </span>
+                  </li>
+                );
+            }
+          })}
+        </ol>
+      </details>
+    </section>
   );
 }
 

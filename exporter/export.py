@@ -186,6 +186,24 @@ def control_doc(match_id, doc, rounds):
     return {"rounds": out} if out else None
 
 
+def chat_doc(doc, rounds):
+    """A league match's chat, from web/tools/chat.mjs's file for its replay:
+    every line as the recording kept it, [t, name, spec, text], t in ticks
+    from the recording's start, and the replay's rounds on the same clock to
+    place them in. A round with no bd_rounds row (match 117's recording began
+    inside R1) keeps its heading with seq None, so nothing is said of how it
+    ended. None when the replay holds no chat."""
+    if not doc or not doc.get("lines"):
+        return None
+    seqs = {r["seq"] for r in rounds}
+    return {"end": doc.get("end"),
+            "rounds": [{"seq": r["seq"] if r.get("seq") in seqs else None,
+                        "round": r["round"], "attempt": r["attempt"],
+                        "base": r["base"], "start": r["start"],
+                        "end": r["end"]} for r in doc.get("rounds", ())],
+            "lines": doc["lines"]}
+
+
 def career(c):
     """A career as the site stores it: None for none, else every key, with
     None for anything not tracked."""
@@ -198,7 +216,7 @@ class Section:
     """One bot's database, read once."""
 
     def __init__(self, name, conn, scopes, is_bot, replays=None,
-                 replay_site=None, unfinished=True, control=None):
+                 replay_site=None, unfinished=True, control=None, chat=None):
         self.name = name
         self.scopes = scopes
         self.is_bot = is_bot
@@ -248,6 +266,7 @@ class Section:
         self.conn = conn
         self.replay = {}
         self.control = {}
+        self.chat = {}
         if replays is not None:
             for m in self.matches:
                 rid = ("%s-%s" % (m.get("arena"), m.get("recording"))
@@ -259,6 +278,10 @@ class Section:
                                       self.rounds_by_match.get(m["id"], []))
                     if got:
                         self.control[m["id"]] = got
+                    said = chat_doc((chat or {}).get(rid.lower()),
+                                    self.rounds_by_match.get(m["id"], []))
+                    if said:
+                        self.chat[m["id"]] = said
 
     def counts(self, m):
         """Whether a match is in histories, counts and bases."""
@@ -312,6 +335,8 @@ class Section:
         }
         if mid in self.control:
             out["control"] = self.control[mid]
+        if mid in self.chat:
+            out["chat"] = self.chat[mid]
         return out
 
     def facts(self, keys):
@@ -385,7 +410,8 @@ def neobot_history(games, rows):
 
 
 def export(pub_conn, league_conn, out, league_exclude=(), replays=None,
-           replay_site="https://ss-replay.pages.dev", now=None, control=None):
+           replay_site="https://ss-replay.pages.dev", now=None, control=None,
+           chat=None):
     """Write the whole site's data under `out`. Returns a summary dict."""
     started = time.monotonic()
     pub_bots = readers.bot_names(pub_conn)
@@ -393,7 +419,7 @@ def export(pub_conn, league_conn, out, league_exclude=(), replays=None,
     league = Section("league", league_conn, LEAGUE_SCOPES,
                      lambda l: any(glob_match(p, l) for p in league_exclude),
                      replays=replays, replay_site=replay_site,
-                     unfinished=False, control=control)
+                     unfinished=False, control=control, chat=chat)
     w = Writer(out)
 
     # ---- who is who ---------------------------------------------------------
@@ -581,4 +607,5 @@ def export(pub_conn, league_conn, out, league_exclude=(), replays=None,
             "league_matches": len(league.matches),
             "neobot_games": len(pub.neobot_matches),
             "replay_links": len(league.replay),
-            "control_matches": len(league.control)}
+            "control_matches": len(league.control),
+            "chat_matches": len(league.chat)}
