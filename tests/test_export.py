@@ -311,6 +311,44 @@ class TestMatches(ExportCase):
         # the match page only: the lists and leaderboards' facts stay small
         self.assertNotIn('"shares"', json.dumps(self.load("facts/league.json")))
 
+    def test_chat_only_from_a_published_replay_with_its_rounds(self):
+        recs = ("bd202611011900", "bd202611012000", "bd202611012100",
+                "bd202611012200")
+        a, b, c, d = (self.league.match(mode="match", arena="bdl", recording=r)
+                      for r in recs)
+        for mid in (a, b, c, d):
+            self.league.player(mid, "Ann", 0, True)
+            self.league.round(mid, 1, 0)
+        rnd = lambda seq, round_no: {"seq": seq, "round": round_no,
+                                     "attempt": 1, "base": 3,
+                                     "start": 100 * round_no,
+                                     "end": 100 * round_no + 50}
+        lines = [[40, "Ann", 0, "gl"], [120, "Bob", 1, "nice"],
+                 [130, None, 0, "no sender"]]
+        chat = {"bdl-" + recs[0]: {"id": "bdl-" + recs[0], "end": 900,
+                                   # seq 9: no bd_rounds row (a recording
+                                   # begun inside a round)
+                                   "rounds": [rnd(9, 0), rnd(1, 1)],
+                                   "lines": lines},
+                "bdl-" + recs[2]: {"id": "bdl-" + recs[2], "end": 900,
+                                   "rounds": [], "lines": lines},
+                "bdl-" + recs[3]: {"id": "bdl-" + recs[3], "end": 900,
+                                   "rounds": [rnd(1, 1)], "lines": []}}
+        # b is published with no chat file; c has one but no replay; d's
+        # replay has no chat at all
+        got = self.run_export(replays={"bdl-" + r: "bdl-" + r
+                                       for r in (recs[0], recs[1], recs[3])},
+                              chat=chat)
+        shard = self.load("m/league/0.json")
+        self.assertEqual(shard[str(a)]["chat"], {
+            "end": 900, "lines": lines,
+            "rounds": [dict(rnd(9, 0), seq=None), rnd(1, 1)]})
+        for mid in (b, c, d):
+            self.assertNotIn("chat", shard[str(mid)])
+        self.assertEqual(got["chat_matches"], 1)
+        # the match page only
+        self.assertNotIn("no sender", json.dumps(self.load("facts/league.json")))
+
     def test_play_time_leaves_out_holds_and_gaps(self):
         m = self.pub.match(length=1000.0, held_seconds=100.0,
                            dead_seconds=50.0)

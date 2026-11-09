@@ -60,6 +60,9 @@
   --viz-a: #c4521c;
   --viz-b: #2563d6;
   --viz-1: #2a78d6;
+  /* Spectators' team chat: yellow, as the game shows team chat, kept apart
+     from the site's gold. 6.6:1 on --surface. */
+  --chat-spec: #735a00;
   --display: "Chakra Petch", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -101,6 +104,7 @@
     --viz-a: #d95926;
     --viz-b: #4b93ff;
     --viz-1: #3987e5;
+    --chat-spec: #e3cf7d;      /* 11.9:1 on --surface; paler than the gold links */
     color-scheme: dark;
   }
 }
@@ -523,6 +527,27 @@ table.data.gap-table, table.data.bots-table { max-width: 560px; }
 .control { margin: 18px 0 14px; }
 .control h3 { margin: 0; }
 .rounds tr[id] { scroll-margin-top: 80px; }
+/* Chat (league matches with a replay): open from the start, a log that
+   scrolls in its own box, each round's heading held at its top. Time,
+   then "name> text" with a hanging indent, as the game prints a line. */
+.chat-fold > summary { cursor: pointer; color: var(--link); font-size: 0.9rem; font-weight: 600; min-height: 32px; display: inline-flex; align-items: center; gap: 6px; }
+.chat-fold > summary::before { content: "▸"; font-size: 0.8em; transition: transform 0.15s; }
+.chat-fold[open] > summary::before { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .chat-fold > summary::before { transition: none; } }
+.chat-fold .chart-note { margin: 6px 0 10px; }
+.chat-log { --chat-tw: 3.7rem; list-style: none; margin: 0; padding: 0 4px 0 0; max-height: min(70vh, 40rem); overflow-y: auto; overscroll-behavior: contain; font-size: 0.875rem; line-height: 1.45; border-top: 1px solid var(--line); }
+.chat-log li { display: grid; grid-template-columns: var(--chat-tw) minmax(0, 1fr); gap: 0 8px; padding: 1px 0; }
+.chat-t { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
+a.chat-t { text-decoration: none; }
+a.chat-t:hover, a.chat-t:focus-visible { color: var(--text); text-decoration: underline; text-decoration-color: var(--link-line); }
+.chat-msg { overflow-wrap: anywhere; padding-left: 1.2em; text-indent: -1.2em; }
+.chat-who { font-weight: 600; }
+.chat-line.spec .chat-msg { color: var(--chat-spec); }
+.chat-line.cmd .chat-msg { color: var(--muted); }
+.chat-log .chat-round { position: sticky; top: 0; z-index: 1; background: var(--surface); margin-top: 6px; padding: 5px 0 3px; border-bottom: 1px solid var(--line); font-weight: 700; }
+.chat-log .chat-round:first-child { margin-top: 0; }
+.chat-log .chat-end { color: var(--text-2); font-weight: 600; padding: 3px 0; }
+.chat-log .chat-gap { display: block; color: var(--muted); font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; padding: 8px 0 2px calc(var(--chat-tw) + 8px); }
 
 /* ---- records ----
    A grid of small cards, each a short ranked list: who or what, the figure,

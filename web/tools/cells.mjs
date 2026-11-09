@@ -23,6 +23,7 @@ export * from ${JSON.stringify(join(here, "src/played.ts"))};
 export * from ${JSON.stringify(join(here, "src/compare.ts"))};
 export * from ${JSON.stringify(join(here, "src/bases.ts"))};
 export * from ${JSON.stringify(join(here, "src/activity.ts"))};
+export * from ${JSON.stringify(join(here, "src/chat.ts"))};
 `);
 await build({ entryPoints: [entry], bundle: true, format: "esm", platform: "node",
   outfile: join(tmp, "site.mjs"), logLevel: "error" });
@@ -71,6 +72,13 @@ for (const f of readdirSync(join(data, "m", "neobot"))) {
       rows: flat(site.neobotBoard(site.rows(doc.lines), players, doc.match.winner_freq, doc.match.active_seconds)),
       highlights: hl(players),
     };
+  }
+}
+// The chat on each league match page with a replay, item by item as drawn.
+result.chat = {};
+for (const f of readdirSync(join(data, "m", "league"))) {
+  for (const [id, doc] of Object.entries(load(`m/league/${f}`))) {
+    if (doc.chat) result.chat[id] = site.chatTimeline(doc.chat, site.rows(doc.rounds));
   }
 }
 // The bases page, every line of both sections.

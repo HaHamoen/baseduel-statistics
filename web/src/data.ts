@@ -237,6 +237,27 @@ export interface ControlRound {
   shares: (number | null)[];
 }
 
+/** A league match's chat, from its replay (web/tools/chat.mjs): every line
+ * as the recording kept it, public chat and the spectators' team chat, and the
+ * replay's rounds to place them in. Times are ticks (1/100 s) from the
+ * recording's start. A round's seq is null when the database has no row for
+ * it; its end is null when it never closed. */
+export interface ChatRound {
+  seq: number | null;
+  round: number;
+  attempt: number;
+  base: number;
+  start: number;
+  end: number | null;
+}
+/** [t, name (null: no sender), 1 = spectators' team chat, text] */
+export type ChatLine = [number, string | null, 0 | 1, string];
+export interface ChatDoc {
+  end: number | null;
+  rounds: ChatRound[];
+  lines: ChatLine[];
+}
+
 export interface MatchDoc {
   match: MatchRow;
   players: Table;
@@ -244,6 +265,8 @@ export interface MatchDoc {
   round_players: Table;
   /** League matches with a replay only. */
   control?: { rounds: ControlRound[] };
+  /** League matches whose replay holds any chat. */
+  chat?: ChatDoc;
 }
 
 export interface NeobotMatchRow {

@@ -22,7 +22,8 @@
 #   BDSTATS_PUB_DB      ~/PyCore/pubduel.db
 #   BDSTATS_LEAGUE_DB   ~/PyCore/baseduel.db
 #   BDSTATS_REPLAYS     ~/ss-replay/web/public/data/index.json (links to the
-#                       league's published replays; skipped if missing)
+#                       league's published replays, and web/tools/chat.mjs
+#                       reads their chat into .snap/chat; skipped if missing)
 #   BDSTATS_SSREPLAY    ~/ss-replay (its web/src: the base control code that
 #                       web/tools/control.mjs runs over the replays beside the
 #                       index, read-only, into .snap/control)
@@ -53,7 +54,8 @@ marker=".deployed-$branch"
 replays_seen() { stat -L -c '%n %s %.9Y' "$replays" 2>/dev/null || echo "$replays none"; }
 newer() {
   find web/public/data web/src web/index.html web/public/_headers web/package.json \
-    web/tools/control.mjs web/tools/control-rounds.mjs tools/deploy.sh exporter -newer "$marker" -print -quit
+    web/tools/control.mjs web/tools/control-rounds.mjs web/tools/chat.mjs tools/deploy.sh exporter \
+    -newer "$marker" -print -quit
 }
 
 mkdir -p .snap
@@ -82,6 +84,7 @@ python3 -m exporter snapshot "$league_db" .snap/baseduel.db >/dev/null
 args=(--pub .snap/pubduel.db --league .snap/baseduel.db --out web/public/data
       --league-exclude "${BDSTATS_LEAGUE_EXCLUDE:-Zero-EG-*}")
 control=""
+chat=""
 if [ -f "$replays" ]; then
   args+=(--replays "$replays")
   # Base control of each league replay: only new or changed ones are worked
@@ -92,8 +95,15 @@ if [ -f "$replays" ]; then
     control=""
   fi
   if [ -d .snap/control ]; then args+=(--control .snap/control); fi
+  # The chat of each league replay, read only when the replay is new or
+  # changed; the same rule if it fails: the last run's files stay.
+  if ! chat=$(cd web && node tools/chat.mjs "$(dirname "$replays")" ../.snap/chat); then
+    echo "refresh: chat FAILED, the last run's kept" >&2
+    chat=""
+  fi
+  if [ -d .snap/chat ]; then args+=(--chat .snap/chat); fi
 fi
-summary="$(python3 -m exporter export "${args[@]}")${control:+ $control}"
+summary="$(python3 -m exporter export "${args[@]}")${control:+ $control}${chat:+ $chat}"
 # Taken before the snapshots: a write while they ran makes the next run full.
 printf '%s\n' "$seen" > .snap/seen
 # The league's last match as exported, for the next TRIGGER=league run.
