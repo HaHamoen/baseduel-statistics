@@ -2,7 +2,7 @@
 python3 -m exporter snapshot SRC DST [--immutable]
 python3 -m exporter export --pub PUBDB --league LEAGUEDB --out DIR
                            [--replays INDEX] [--replay-site URL]
-                           [--league-exclude 'Zero-EG-*']
+                           [--control DIR] [--league-exclude 'Zero-EG-*']
 python3 -m exporter matches DB
 
 `snapshot` copies a live database with the backup API. `export` reads two
@@ -27,6 +27,18 @@ def load_replays(path):
     with open(path, encoding="utf-8") as f:
         entries = json.load(f)
     return {e["id"].lower(): e["id"] for e in entries if e.get("id")}
+
+
+def load_control(folder):
+    """web/tools/control.mjs's files, as {lowercased replay id: doc}: the
+    base control of each league replay, by ss-replay's own code."""
+    out = {}
+    for name in sorted(os.listdir(folder)):
+        if name.endswith(".json"):
+            with open(os.path.join(folder, name), encoding="utf-8") as f:
+                doc = json.load(f)
+            out[doc["id"].lower()] = doc
+    return out
 
 
 def last_match(path):
@@ -55,6 +67,7 @@ def main(argv=None):
     e.add_argument("--out", required=True, help="the data folder")
     e.add_argument("--replays", help="ss-replay's data/index.json")
     e.add_argument("--replay-site", default="https://ss-replay.pages.dev")
+    e.add_argument("--control", help="web/tools/control.mjs's output folder")
     e.add_argument("--league-exclude", default="Zero-EG-*",
                    help="BASEDUEL_STATS_EXCLUDE's patterns, comma-separated")
     m = sub.add_parser("matches", help="the last match number and the count")
@@ -74,7 +87,9 @@ def main(argv=None):
                      league_exclude=parse_exclude_list(args.league_exclude),
                      replays=load_replays(args.replays) if args.replays
                      else None,
-                     replay_site=args.replay_site)
+                     replay_site=args.replay_site,
+                     control=load_control(args.control) if args.control
+                     else None)
     finally:
         pub.close()
         league.close()

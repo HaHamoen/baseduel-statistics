@@ -6,7 +6,7 @@
 // series. Keyboard: focus the chart, then the arrow keys move the crosshair.
 
 import type { ComponentChildren } from "preact";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useId, useRef, useState } from "preact/hooks";
 
 export interface Series {
   id: string;
@@ -46,6 +46,9 @@ interface Props {
   xTicks: number[];
   xFmt: (i: number) => string;
   reference?: { y: number; label: string };
+  /** One line, two colours: `above` over the value y, `below` under it
+   * (base control: the line takes the colour of the team holding more). */
+  split?: { y: number; above: string; below: string };
   endLabel?: (s: Series, v: number) => string;
   tip: (i: number) => Tip;
   height?: number;
@@ -58,6 +61,7 @@ export function LineChart(p: Props) {
   const box = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(640);
   const [hover, setHover] = useState<number | null>(null);
+  const clip = useId();
   useEffect(() => {
     const el = box.current;
     if (!el) return;
@@ -139,7 +143,23 @@ export function LineChart(p: Props) {
             <text x={M.left + pw + 6} y={y(p.reference.y)} dy="0.32em">{p.reference.label}</text>
           </g>
         )}
-        {p.series.map((s) => <path class={`line ${s.cls}`} d={path(s.values, s.dy)} />)}
+        {p.split ? (() => {
+          const at = y(p.split.y), sp = p.split;
+          return (
+            <>
+              <defs>
+                <clipPath id={`${clip}-a`}><rect x={0} y={0} width={width} height={at} /></clipPath>
+                <clipPath id={`${clip}-b`}><rect x={0} y={at} width={width} height={height - at} /></clipPath>
+              </defs>
+              {p.series.map((s) => (
+                <>
+                  <path class={`line ${sp.above}`} d={path(s.values, s.dy)} clip-path={`url(#${clip}-a)`} />
+                  <path class={`line ${sp.below}`} d={path(s.values, s.dy)} clip-path={`url(#${clip}-b)`} />
+                </>
+              ))}
+            </>
+          );
+        })() : p.series.map((s) => <path class={`line ${s.cls}`} d={path(s.values, s.dy)} />)}
         {labelled.map((e) => (
           <text class="end-label" x={x(e.i) + 8} y={y(e.v)} dy="0.32em">{p.endLabel!(e.s, e.v)}</text>
         ))}
@@ -147,7 +167,8 @@ export function LineChart(p: Props) {
           <g class="hover">
             <line class="crosshair" x1={x(hover)} x2={x(hover)} y1={M.top} y2={M.top + ph} />
             {p.series.map((s) => s.values[hover] == null ? null : (
-              <circle class={`dot ${s.cls}`} cx={x(hover)} cy={y(s.values[hover]!) + (s.dy || 0)} r={4} />
+              <circle class={`dot ${!p.split ? s.cls : s.values[hover]! >= p.split.y ? p.split.above : p.split.below}`}
+                      cx={x(hover)} cy={y(s.values[hover]!) + (s.dy || 0)} r={4} />
             ))}
           </g>
         )}
