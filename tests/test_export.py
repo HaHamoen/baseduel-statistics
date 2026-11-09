@@ -286,6 +286,31 @@ class TestMatches(ExportCase):
                          "https://example.test/r/bdl-bd202611011900")
         self.assertIsNone(shard[str(b)]["match"]["replay"])
 
+    def test_base_control_only_from_a_published_replay_and_its_rounds(self):
+        recs = ("bd202611011900", "bd202611012000", "bd202611012100")
+        a, b, c = (self.league.match(mode="match", arena="bdl", recording=r)
+                   for r in recs)
+        for mid in (a, b, c):
+            self.league.player(mid, "Ann", 0, True)
+            self.league.round(mid, 1, 0)
+        rnd = lambda seq, pct, shares: {"seq": seq, "round": seq, "attempt": 1,
+                                        "base": 3, "held": pct / 100.0,
+                                        "pct": pct, "shares": shares}
+        control = {"bdl-" + r: {"id": "bdl-" + r, "rounds": [
+            rnd(1, 62, [0.5, None, 0.74]),
+            rnd(9, 40, [0.4])]}           # seq 9: no bd_rounds row, left out
+            for r in (recs[0], recs[2])}
+        # b is published with no control file; c has one, but no replay
+        self.run_export(replays={"bdl-" + r: "bdl-" + r for r in recs[:2]},
+                        control=control)
+        shard = self.load("m/league/0.json")
+        self.assertEqual(shard[str(a)]["control"], {"rounds": [
+            {"seq": 1, "held": 62, "shares": [0.5, None, 0.74]}]})
+        self.assertNotIn("control", shard[str(b)])
+        self.assertNotIn("control", shard[str(c)])
+        # the match page only: the lists and leaderboards' facts stay small
+        self.assertNotIn('"shares"', json.dumps(self.load("facts/league.json")))
+
     def test_play_time_leaves_out_holds_and_gaps(self):
         m = self.pub.match(length=1000.0, held_seconds=100.0,
                            dead_seconds=50.0)

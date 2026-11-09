@@ -228,11 +228,22 @@ export interface RoundRow {
   duration_s: number;
 }
 
+/** One round's base control, from its replay (web/tools/control.mjs, by
+ * ss-replay's own code): freq 0's Held percent as the replay's dashboard
+ * shows it, and freq 0's share once a second, null where no base was played. */
+export interface ControlRound {
+  seq: number;
+  held: number | null;
+  shares: (number | null)[];
+}
+
 export interface MatchDoc {
   match: MatchRow;
   players: Table;
   rounds: Table;
   round_players: Table;
+  /** League matches with a replay only. */
+  control?: { rounds: ControlRound[] };
 }
 
 export interface NeobotMatchRow {

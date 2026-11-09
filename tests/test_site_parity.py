@@ -11,6 +11,11 @@ its highlights, and every career's record, Win%, K/D and KPM.
 
 Needs Node and web/node_modules (it runs web/tools/cells.mjs), and PyCore at
 $BD_STATS_PYCORE or ~/PyCore, imported read-only with no bytecode written.
+
+Base control (check_control) needs CONTROL_DIR, web/tools/control.mjs's
+output; REPLAYS_DATA, the replay folder, adds the cross-check against
+ss-replay's own Python analysis where $BD_STATS_SSREPLAY / ~/ss-replay has it.
+tools/check.sh sets both when given REPLAYS_DATA.
 """
 import json
 import os
@@ -178,6 +183,108 @@ def check_bases(site_bases, fail):
             if l is None or any(l[f] != w[f] for f in w) or not same_num(l["median"], med):
                 fail("bases %s %s: sql %r median %r, site %r" % (section, k, w, med, l))
         conn.close()
+    return checked
+
+
+def js_round(x):
+    """JavaScript's Math.round: halves up, as the replay's Held cell rounds."""
+    import math
+    return math.floor(x + 0.5)
+
+
+def check_control(data, control_dir, replays_data, fail):
+    """Base control (web/tools/control.mjs, by ss-replay's own code) against
+    the league database and, where it can be imported, ss-replay's separate
+    Python port (ssreplay/analysis.py on its feat/match-analysis branch):
+    - every round a replay names is the bd_rounds row of its seq, with the
+      same round number, attempt and base (the seq join, never round_no);
+    - a match page carries exactly those rounds, Held as the replay's own
+      cell (Math.round of the share x 100) and the shares as computed;
+    - Held is the mean of the round's shares (to their rounding);
+    - the Python port's held, per round, within its own rounding (0.0005).
+    Skipped without control files."""
+    import glob
+    import gzip
+    sys.path.insert(0, ROOT)
+    from exporter.snapshot import open_snapshot
+    files = sorted(glob.glob(os.path.join(control_dir or "", "*.json")))
+    if not control_dir or not files:
+        print("SKIP control: no control files")
+        return 0
+    conn = open_snapshot(os.path.join(ROOT, ".snap", "baseduel.db"))
+    match_of = {("%s-%s" % (a, r)).lower(): mid for mid, a, r in conn.execute(
+        "SELECT id, arena, recording FROM bd_matches WHERE recording IS NOT NULL")}
+    analysis = None
+    if replays_data:
+        sys.path.insert(0, os.environ.get("BD_STATS_SSREPLAY", os.path.expanduser("~/ss-replay")))
+        try:
+            from ssreplay import analysis
+        except ImportError:
+            print("SKIP control cross-check: ss-replay has no ssreplay/analysis.py here")
+        if analysis is not None:
+            index = {e["id"]: e for e in load(replays_data, "index.json")}
+    checked = shown_on = 0
+    charted = set()
+    for path in files:
+        with open(path, encoding="utf-8") as f:
+            c = json.load(f)
+        mid = match_of.get(c["id"].lower())
+        if mid is None:
+            continue                          # a replay of no match in this database
+        rows_by_seq = {r[0]: r[1:] for r in conn.execute(
+            "SELECT seq, round_no, attempt, base_num FROM bd_rounds WHERE match_id = ?", (mid,))}
+        want = []
+        for r in c["rounds"]:
+            checked += 1
+            row = rows_by_seq.get(r["seq"])
+            if row is None:
+                continue                          # the exporter leaves it out, and says so
+            if tuple(row) != (r["round"], r["attempt"], r["base"]):
+                fail("control %s seq %s: replay R%s.%s base %s, bd_rounds %r"
+                     % (c["id"], r["seq"], r["round"], r["attempt"], r["base"], row))
+            if (r["held"] is None) != (r["pct"] is None) or (
+                    r["held"] is not None and r["pct"] != js_round(r["held"] * 100)):
+                fail("control %s seq %s: held %r shown as %r" % (c["id"], r["seq"], r["held"], r["pct"]))
+            got = [s for s in r["shares"] if s is not None]
+            if (r["held"] is None) != (not got) or (
+                    got and abs(sum(got) / len(got) - r["held"]) > 0.0005 + 1e-9):
+                fail("control %s seq %s: held %r, its shares average %r"
+                     % (c["id"], r["seq"], r["held"], got and sum(got) / len(got)))
+            want.append({"seq": r["seq"], "held": r["pct"], "shares": r["shares"]})
+        doc = load(data, "m/league/%d.json" % (mid // 10)).get(str(mid))
+        page = (doc or {}).get("control")
+        if want and page != {"rounds": want}:
+            fail("control %s: match %s's page carries %r rounds, not the replay's"
+                 % (c["id"], mid, page and [r["seq"] for r in page["rounds"]]))
+        if want:
+            shown_on += 1
+            charted.add(mid)
+        if analysis is not None and c["id"] in index:
+            e = index[c["id"]]
+            with gzip.open(os.path.join(replays_data, e["replay"])) as f:
+                rdoc = json.load(f)
+            with open(os.path.join(replays_data, e["map"]), "rb") as f:
+                a = analysis.compute(rdoc, f.read())
+            theirs = {(r.get("seq"), r["round"], r["attempt"]): r["teams"][0]["held"]
+                      for r in (a or {}).get("rounds", ())}
+            for r in c["rounds"]:
+                k = (r["seq"], r["round"], r["attempt"])
+                if k not in theirs:
+                    continue                  # analysis.py pairs this round otherwise
+                checked += 1
+                h = theirs[k]
+                if (h is None) != (r["held"] is None) or (
+                        h is not None and abs(h - r["held"]) > 0.0005 + 1e-9):
+                    fail("control %s seq %s: held %r, ss-replay's analysis %r"
+                         % (c["id"], r["seq"], r["held"], h))
+    # and no league match has a chart without a replay behind it
+    for fname in os.listdir(os.path.join(data, "m", "league")):
+        for mid, doc in load(data, "m/league/%s" % fname).items():
+            if "control" in doc and int(mid) not in charted:
+                fail("control: match %s has a chart and no replay behind it" % mid)
+    conn.close()
+    print("control: %d league matches, %d rounds checked%s"
+          % (shown_on, checked, "" if analysis is not None else " (no cross-check)"))
     return checked
 
 
@@ -432,6 +539,10 @@ def main(argv):
 
     # ---- the bases page ----
     checked += check_bases(site["bases"], fail)
+
+    # ---- base control on league match pages, from their replays ----
+    checked += check_control(data, os.environ.get("CONTROL_DIR"),
+                             os.environ.get("REPLAYS_DATA"), fail)
 
     # ---- the activity page ----
     checked += check_activity(site["activity"], fail)

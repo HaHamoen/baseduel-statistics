@@ -5,7 +5,7 @@ import {
   ownBoard, roundHow, roundLabel, SB_COLS, SB_GROUPS, type Cell, type ColGroup,
 } from "../board";
 import {
-  getMatch, getMeta, getNeobotMatch, isNeobotId, rows, type MatchDoc, type NeobotDoc,
+  getMatch, getMeta, getNeobotMatch, isNeobotId, rows, type ControlRound, type MatchDoc, type NeobotDoc,
   type NeobotLineRow, type NeobotPlayerRow, type PlayerRow, type RoundRow, type Section,
 } from "../data";
 import { dateTime, duration, num } from "../format";
@@ -103,7 +103,7 @@ function OwnMatch({ section, doc }: { section: Section; doc: MatchDoc }) {
         </section>
       )}
       {players.length > 0 && <Highlights records={players} />}
-      <Rounds rounds={rounds} names={names} fa={fa} roundPlayers={roundPlayers} />
+      <Rounds rounds={rounds} names={names} fa={fa} roundPlayers={roundPlayers} control={doc.control?.rounds} />
     </>
   );
 }
@@ -238,13 +238,15 @@ function Highlights({ records }: { records: { player_name: string }[] }) {
   );
 }
 
-function Rounds({ rounds, names, fa, roundPlayers }: {
+function Rounds({ rounds, names, fa, roundPlayers, control }: {
   rounds: RoundRow[]; names: Map<number, string>; fa: number; roundPlayers: PlayerRow[];
+  control?: ControlRound[];
 }) {
   const [open, setOpen] = useState<number | null>(null);
   if (!rounds.length) {
     return <section class="card"><h2>Rounds</h2><p class="muted">No rounds were recorded for this match.</p></section>;
   }
+  const held = new Map((control ?? []).map((c) => [c.seq, c.held]));
   return (
     <section class="card">
       <h2>Rounds</h2>
@@ -253,11 +255,13 @@ function Rounds({ rounds, names, fa, roundPlayers }: {
         if (roundPlayers.some((p) => p.seq === r.seq)) setOpen(r.seq);
         document.getElementById(`round-${r.seq}`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
       }} />
+      {control && <ControlChart rounds={rounds} control={control} names={names} fa={fa} />}
       <div class="scroll">
         <table class="data rounds">
           <thead><tr>
             <th scope="col">Round</th><th scope="col">Base</th><th scope="col">Won by</th>
             <th scope="col" class="c">Score</th><th scope="col">How</th><th scope="col" class="n">Length</th>
+            {control && <th scope="col" class="n" title="Share of the base each team held over the round, in percent, as the replay counts it">Held</th>}
             <th scope="col"><span class="sr-only">Players</span></th>
           </tr></thead>
           <tbody>
@@ -274,6 +278,9 @@ function Rounds({ rounds, names, fa, roundPlayers }: {
                     <td class="c">{r.score_a}–{r.score_b}</td>
                     <td>{roundHow(r)}{!r.counted && <span class="muted"> (not counted)</span>}</td>
                     <td class="n">{duration(r.duration_s)}</td>
+                    {control && <td class="n">{held.get(r.seq) == null ? <span class="muted">–</span> : (
+                      <><Team side="a">{held.get(r.seq)}</Team><span class="muted">–</span><Team side="b">{100 - held.get(r.seq)!}</Team></>
+                    )}</td>}
                     <td>{mine.length > 0 && (
                       <button class="link" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : r.seq)}>
                         {isOpen ? "Hide" : "Players"}
@@ -281,7 +288,7 @@ function Rounds({ rounds, names, fa, roundPlayers }: {
                     )}</td>
                   </tr>
                   {isOpen && (
-                    <tr class="round-detail"><td colSpan={7}>
+                    <tr class="round-detail"><td colSpan={control ? 8 : 7}>
                       <RoundPlayers list={mine} fa={fa} />
                     </td></tr>
                   )}
@@ -391,6 +398,60 @@ function ScoreChart({ rounds, names, fa }: { rounds: RoundRow[]; names: Map<numb
         };
       }}
     />
+  );
+}
+
+/** Base control, as the replay's own chart counts it (ss-replay control.ts):
+ * once a second, the share of the base the first team's ships reach first
+ * through the corridors. The rounds laid end to end in the order played, the
+ * breaks between them left out; above the middle line the first team held
+ * more. From the match's replay, so only a league match with one has it. */
+function ControlChart({ rounds, control, names, fa }: {
+  rounds: RoundRow[]; control: ControlRound[]; names: Map<number, string>; fa: number;
+}) {
+  const bySeq = new Map(rounds.map((r) => [r.seq, r]));
+  const fb = [...names.keys()].find((f) => f !== fa)!;
+  const A = names.get(fa) || `Freq ${fa}`, B = names.get(fb) || `Freq ${fb}`;
+  // One x position a second; a null between two rounds breaks the line.
+  const values: (number | null)[] = [];
+  const at: ({ r: RoundRow; s: number } | null)[] = [];
+  const starts: number[] = [];
+  for (const c of control) {
+    const r = bySeq.get(c.seq);
+    if (!r || !c.shares.length) continue;
+    if (values.length) { values.push(null); at.push(null); }
+    starts.push(values.length);
+    c.shares.forEach((v, s) => { values.push(v == null ? null : v * 100); at.push({ r, s }); });
+  }
+  if (!values.some((v) => v != null)) return null;
+  return (
+    <div class="control">
+      <h3>Base control</h3>
+      <LineChart
+        label={`Base control, once a second, round by round: above the middle line ${A} held more of the base, below it ${B}.`}
+        xs={values.length} series={[{ id: "a", label: A, cls: "viz-a", values }]} height={180}
+        yMax={100} yTicks={[0, 25, 50, 75, 100]} yFmt={(v) => `${v}%`}
+        xTicks={starts} xFmt={(i) => roundLabel(at[i]!.r)}
+        reference={{ y: 50, label: "even" }}
+        // the colour of whoever holds more, as the replay's chart draws it
+        split={{ y: 50, above: "viz-a", below: "viz-b" }}
+        tip={(i) => {
+          const here = at[i] ?? at[i + 1]!;          // a break: the round after it
+          const v = at[i] ? values[i] : null;
+          const a = v == null ? null : Math.round(v);
+          return {
+            head: `${roundLabel(here.r)} · base ${here.r.base_num ?? "?"} · ${at[i] ? `${duration(here.s)} in` : "start"}`,
+            rows: a == null ? [] : [
+              { cls: "viz-a", label: A, value: `${a}%` },
+              { cls: "viz-b", label: B, value: `${100 - a}%` },
+            ],
+            note: at[i] && v == null ? "No base was being played." : undefined,
+          };
+        }}
+      />
+      <p class="chart-note">The share of the base each team reached first, once a second, as the replay counts it.
+        Above the middle line {A} held more, below it {B}.</p>
+    </div>
   );
 }
 

@@ -519,6 +519,9 @@ table.data.gap-table, table.data.bots-table { max-width: 560px; }
 .timeline .chart-tip { top: 26px; }
 .timeline .chart-note { margin-top: 2px; }
 @media (prefers-reduced-motion: reduce) { .tl-block::before { transition: none; } }
+/* Base control under the round timeline: league matches with a replay. */
+.control { margin: 18px 0 14px; }
+.control h3 { margin: 0; }
 .rounds tr[id] { scroll-margin-top: 80px; }
 
 /* ---- records ----

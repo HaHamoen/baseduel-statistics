@@ -14,6 +14,7 @@ bd_player_flags but the bot list (the allow, follow and notify lists).
 import itertools
 import json
 import os
+import sys
 import time
 
 from exporter import insights, mates, ratings, readers, records
@@ -164,6 +165,27 @@ CAREER_COLS = CAREER_KEYS + ("player_name", "last_team", "last_match_id",
                              "neobot_matches")
 
 
+def control_doc(match_id, doc, rounds):
+    """A league match's base control, from web/tools/control.mjs's file for
+    its replay: per round (by seq, never round_no), freq 0's Held percent as
+    the replay's dashboard shows it and its share once a second. Only rounds
+    of this match in bd_rounds; None when the match has none."""
+    if not doc:
+        return None
+    seqs = {r["seq"] for r in rounds}
+    out = []
+    for r in doc.get("rounds", ()):
+        if r.get("seq") not in seqs:
+            print("control: match %s: replay round %s.%s has no bd_rounds row "
+                  "(seq %s), left out" % (match_id, r.get("round"),
+                                          r.get("attempt"), r.get("seq")),
+                  file=sys.stderr)
+            continue
+        out.append({"seq": r["seq"], "held": r["pct"],
+                    "shares": r["shares"]})
+    return {"rounds": out} if out else None
+
+
 def career(c):
     """A career as the site stores it: None for none, else every key, with
     None for anything not tracked."""
@@ -176,7 +198,7 @@ class Section:
     """One bot's database, read once."""
 
     def __init__(self, name, conn, scopes, is_bot, replays=None,
-                 replay_site=None, unfinished=True):
+                 replay_site=None, unfinished=True, control=None):
         self.name = name
         self.scopes = scopes
         self.is_bot = is_bot
@@ -225,6 +247,7 @@ class Section:
         # The screens' lines are read as they are written (export), not here.
         self.conn = conn
         self.replay = {}
+        self.control = {}
         if replays is not None:
             for m in self.matches:
                 rid = ("%s-%s" % (m.get("arena"), m.get("recording"))
@@ -232,6 +255,10 @@ class Section:
                 if rid and rid.lower() in replays:
                     self.replay[m["id"]] = "%s/r/%s" % (
                         replay_site.rstrip("/"), replays[rid.lower()])
+                    got = control_doc(m["id"], (control or {}).get(rid.lower()),
+                                      self.rounds_by_match.get(m["id"], []))
+                    if got:
+                        self.control[m["id"]] = got
 
     def counts(self, m):
         """Whether a match is in histories, counts and bases."""
@@ -275,7 +302,7 @@ class Section:
         doc.update(played_seconds=match_seconds(m),
                    rounds_counted=m["rounds_counted"],
                    replay=self.replay.get(mid))
-        return {
+        out = {
             "match": doc,
             "players": table(self.players_by_match.get(mid, []),
                              MATCH_PLAYER_COLS),
@@ -283,6 +310,9 @@ class Section:
             "round_players": table(self.round_players_by_match.get(mid, []),
                                    ROUND_PLAYER_COLS),
         }
+        if mid in self.control:
+            out["control"] = self.control[mid]
+        return out
 
     def facts(self, keys):
         """Every match and every player-match row, for the browser to filter
@@ -355,7 +385,7 @@ def neobot_history(games, rows):
 
 
 def export(pub_conn, league_conn, out, league_exclude=(), replays=None,
-           replay_site="https://ss-replay.pages.dev", now=None):
+           replay_site="https://ss-replay.pages.dev", now=None, control=None):
     """Write the whole site's data under `out`. Returns a summary dict."""
     started = time.monotonic()
     pub_bots = readers.bot_names(pub_conn)
@@ -363,7 +393,7 @@ def export(pub_conn, league_conn, out, league_exclude=(), replays=None,
     league = Section("league", league_conn, LEAGUE_SCOPES,
                      lambda l: any(glob_match(p, l) for p in league_exclude),
                      replays=replays, replay_site=replay_site,
-                     unfinished=False)
+                     unfinished=False, control=control)
     w = Writer(out)
 
     # ---- who is who ---------------------------------------------------------
@@ -550,4 +580,5 @@ def export(pub_conn, league_conn, out, league_exclude=(), replays=None,
             "players": len(index), "pub_matches": len(pub.matches),
             "league_matches": len(league.matches),
             "neobot_games": len(pub.neobot_matches),
-            "replay_links": len(league.replay)}
+            "replay_links": len(league.replay),
+            "control_matches": len(league.control)}

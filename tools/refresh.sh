@@ -23,6 +23,9 @@
 #   BDSTATS_LEAGUE_DB   ~/PyCore/baseduel.db
 #   BDSTATS_REPLAYS     ~/ss-replay/web/public/data/index.json (links to the
 #                       league's published replays; skipped if missing)
+#   BDSTATS_SSREPLAY    ~/ss-replay (its web/src: the base control code that
+#                       web/tools/control.mjs runs over the replays beside the
+#                       index, read-only, into .snap/control)
 #   BDSTATS_LEAGUE_EXCLUDE  Zero-EG-*  (the league bot's BASEDUEL_STATS_EXCLUDE)
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -43,13 +46,14 @@ elif ! flock -n 9; then echo "refresh: another run is going, skipped"; exit 0; f
 pub_db="${BDSTATS_PUB_DB:-$HOME/PyCore/pubduel.db}"
 league_db="${BDSTATS_LEAGUE_DB:-$HOME/PyCore/baseduel.db}"
 replays="${BDSTATS_REPLAYS:-$HOME/ss-replay/web/public/data/index.json}"
+ssreplay="${BDSTATS_SSREPLAY:-$HOME/ss-replay}"
 started=$(date +%s)
 
 marker=".deployed-$branch"
 replays_seen() { stat -L -c '%n %s %.9Y' "$replays" 2>/dev/null || echo "$replays none"; }
 newer() {
   find web/public/data web/src web/index.html web/public/_headers web/package.json \
-    tools/deploy.sh exporter -newer "$marker" -print -quit
+    web/tools/control.mjs web/tools/control-rounds.mjs tools/deploy.sh exporter -newer "$marker" -print -quit
 }
 
 mkdir -p .snap
@@ -77,8 +81,19 @@ python3 -m exporter snapshot "$pub_db" .snap/pubduel.db >/dev/null
 python3 -m exporter snapshot "$league_db" .snap/baseduel.db >/dev/null
 args=(--pub .snap/pubduel.db --league .snap/baseduel.db --out web/public/data
       --league-exclude "${BDSTATS_LEAGUE_EXCLUDE:-Zero-EG-*}")
-if [ -f "$replays" ]; then args+=(--replays "$replays"); fi
-summary=$(python3 -m exporter export "${args[@]}")
+control=""
+if [ -f "$replays" ]; then
+  args+=(--replays "$replays")
+  # Base control of each league replay: only new or changed ones are worked
+  # out. If ss-replay's code will not run, the files from the last run stay,
+  # so no chart disappears from the site over it.
+  if ! control=$(cd web && node tools/control.mjs "$(dirname "$replays")" "$ssreplay/web/src" ../.snap/control); then
+    echo "refresh: base control FAILED, the last run's kept" >&2
+    control=""
+  fi
+  if [ -d .snap/control ]; then args+=(--control .snap/control); fi
+fi
+summary="$(python3 -m exporter export "${args[@]}")${control:+ $control}"
 # Taken before the snapshots: a write while they ran makes the next run full.
 printf '%s\n' "$seen" > .snap/seen
 # The league's last match as exported, for the next TRIGGER=league run.
