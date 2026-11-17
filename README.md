@@ -32,6 +32,19 @@ The two are never added together: different arenas, different settings.
   Damage relationships, attach relationships and available/remaining item
   counts are not in the available replay stats; those limitations are shown
   explicitly rather than inventing player breakdowns.
+  Matches with replays add highlights for
+  most kills/deaths in any rolling 60-second window, most enemy kills without
+  dying and most deaths without an enemy kill. Replay peaks cover the whole
+  recording, including between rounds and runs still in progress at its end.
+  Minute counts include team kills; suicides count as deaths, not kills.
+  Each highlight opens a complete highest-to-lowest ranking for the match;
+  player names still link to career pages, and untracked values stay untracked.
+  Highlights are grouped by score/time, kills, deaths, damage, teamwork and
+  items, with an arrow marking each clickable card. Uninterrupted-minute
+  highlights count kills before any death and deaths before any kill within
+  rolling windows of up to 60 seconds; shorter runs qualify and team kills
+  count as kills. Scoreboard headers sort within each team, reversing on a
+  second click; team totals stay at the bottom and untracked values sort last.
 - **Leaderboards:** every board the bots offer in game, plus a time range and
   a minimum number of matches.
 - **Records:** most kills and damage in a match, longest streaks, winning

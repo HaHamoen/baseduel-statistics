@@ -3,6 +3,7 @@
 // so its totals can differ by a few from the bot's scoreboard, which counts
 // the match's rounds; the match page says so.
 
+import { highlightLeaders, type Highlight, type HighlightGroup } from "./board";
 import { fold } from "./format";
 
 interface RawKill {
@@ -193,4 +194,66 @@ export function minuteKills(kills: Kill[], name: string, window: [number, number
     buckets[Math.floor((k.t - start) / 6000)].kills++;
   }
   return buckets;
+}
+
+/** Counts events within a half-open rolling 60-second window. */
+function rollingMinutePeak(ticks: number[]): number {
+  let left = 0, best = 0;
+  for (let right = 0; right < ticks.length; right++) {
+    while (ticks[right] - ticks[left] >= 6000) left++;
+    best = Math.max(best, right - left + 1);
+  }
+  return best;
+}
+
+export function playerReplayPeaks(kills: Kill[], name: string) {
+  const me = fold(name);
+  const killsAt: number[] = [], deathsAt: number[] = [];
+  let liveKills: number[] = [], killFreeDeaths: number[] = [];
+  let killsMinuteWithoutDying = 0, deathsMinuteWithoutKilling = 0;
+  let deaths = 0, deathsBeforeKill = 0;
+  for (const k of [...kills].sort((a, b) => a.t - b.t)) {
+    const gave = fold(k.killer) === me && fold(k.killed) !== me;
+    if (gave) {
+      killsAt.push(k.t);
+      liveKills.push(k.t);
+      deathsMinuteWithoutKilling = Math.max(deathsMinuteWithoutKilling, rollingMinutePeak(killFreeDeaths));
+      killFreeDeaths = [];
+      if (!k.teamKill) deaths = 0;
+    }
+    if (fold(k.killed) === me) {
+      deathsAt.push(k.t);
+      killFreeDeaths.push(k.t);
+      killsMinuteWithoutDying = Math.max(killsMinuteWithoutDying, rollingMinutePeak(liveKills));
+      liveKills = [];
+      deathsBeforeKill = Math.max(deathsBeforeKill, ++deaths);
+    }
+  }
+  const { streaks } = playerStreaks(kills, name);
+  return {
+    killsMinute: rollingMinutePeak(killsAt),
+    deathsMinute: rollingMinutePeak(deathsAt),
+    killsBeforeDying: Math.max(0, ...streaks.map((s) => s.kills.length)),
+    deathsBeforeKill,
+    killsMinuteWithoutDying: Math.max(killsMinuteWithoutDying, rollingMinutePeak(liveKills)),
+    deathsMinuteWithoutKilling: Math.max(deathsMinuteWithoutKilling, rollingMinutePeak(killFreeDeaths)),
+  };
+}
+
+export function replayHighlights(kills: Kill[], players: { player_name: string }[]): Highlight[] {
+  const peaks = players.map((p) => ({ ...playerReplayPeaks(kills, p.player_name), player_name: p.player_name }));
+  const categories: [HighlightGroup, string, keyof ReturnType<typeof playerReplayPeaks>][] = [
+    ["Kills", "Most kills in a minute", "killsMinute"],
+    ["Kills", "Most enemy kills before dying", "killsBeforeDying"],
+    ["Deaths", "Most deaths in a minute", "deathsMinute"],
+    ["Deaths", "Most deaths before a kill", "deathsBeforeKill"],
+    ["Kills", "Most kills in a minute without dying", "killsMinuteWithoutDying"],
+    ["Deaths", "Most deaths in a minute without killing", "deathsMinuteWithoutKilling"],
+  ];
+  const out: Highlight[] = [];
+  for (const [group, label, key] of categories) {
+    const h = highlightLeaders(group, label, peaks, (p) => p[key]);
+    if (h) out.push(h);
+  }
+  return out;
 }

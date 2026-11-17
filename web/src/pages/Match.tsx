@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { LineChart, niceTicks, type Series } from "../charts";
 import {
-  BoardGroup, COL_HELP, highlights, LEGEND, markerKey, NEOBOT_COLS, NEOBOT_GROUPS, neobotBoard,
-  ownBoard, roundHow, roundLabel, SB_COLS, SB_GROUPS, type Cell, type ColGroup,
+  BoardGroup, COL_HELP, HIGHLIGHT_GROUPS, highlights, LEGEND, markerKey, NEOBOT_COLS, NEOBOT_GROUPS, neobotBoard,
+  ownBoard, roundHow, roundLabel, SB_COLS, SB_GROUPS, sortBoardRows, type BoardSortDirection,
+  type Cell, type ColGroup, type Highlight, type HighlightRecord,
 } from "../board";
 import {
   getMatch, getMeta, getNeobotMatch, isNeobotId, rows, type ChatDoc, type ControlRound, type MatchDoc, type NeobotDoc,
@@ -12,8 +13,9 @@ import { chatCounts, chatTimeline } from "../chat";
 import { dateTime, duration, fold, num } from "../format";
 import { freqsOf, kindLabel, modeLine, outcomeWord, teamNames } from "../matchinfo";
 import { MatchPlayerModal } from "../MatchPlayerModal";
+import { loadReplayStats, replayHighlights } from "../killlog";
 import { playerHref } from "../router";
-import { Loading, Pills, Problem, Team, useLoad, useTitle } from "../ui";
+import { Loading, Modal, Pills, Problem, Team, useLoad, useTitle } from "../ui";
 
 export function Match({ section, id }: { section: Section; id: number }) {
   const [got, error] = useLoad(async () => {
@@ -112,7 +114,7 @@ function OwnMatch({ section, doc }: { section: Section; doc: MatchDoc }) {
                           row={players.find((p) => fold(p.player_name) === fold(stat.name))}
                           onClose={() => setStat(null)} />
       )}
-      {players.length > 0 && <Highlights records={players} />}
+      {players.length > 0 && <Highlights records={players} replay={m.replay} />}
       <Rounds rounds={rounds} names={names} fa={fa} roundPlayers={roundPlayers} control={doc.control?.rounds} />
       {doc.chat && <Chat chat={doc.chat} rounds={rounds} names={names} fa={fa} replay={m.replay} />}
     </>
@@ -144,6 +146,19 @@ function Board({ heading, cols, colGroups, groups, onStat }: {
   onStat?: (name: string, column: string, value: Cell) => void;
 }) {
   const [density, setDensity] = useDensity();
+  const [sort, setSort] = useState<{ column: number; direction: BoardSortDirection } | null>(null);
+  const changeSort = (column: number) => setSort((current) => ({
+    column,
+    direction: current?.column === column
+      ? current.direction === "ascending" ? "descending" : "ascending"
+      : column === -1 ? "ascending" : "descending",
+  }));
+  const th = (label: string, column: number) => (
+    <th scope="col" class={column === -1 ? "name-col" : "n"} title={COL_HELP[label]}
+        aria-sort={sort?.column === column ? sort.direction : undefined}>
+      <button type="button" class="sort" onClick={() => changeSort(column)}>{label}</button>
+    </th>
+  );
   // Only when the families cover the columns exactly: a mismatch would draw
   // the hairlines in the wrong places.
   const grouped = colGroups.reduce((n, g) => n + g.span, 0) === cols.length;
@@ -161,8 +176,8 @@ function Board({ heading, cols, colGroups, groups, onStat }: {
           <colgroup class={g.cls}><col class={g.lead ? "lead" : undefined} span={g.span} /></colgroup>
         ))}
         <thead><tr>
-          <th scope="col" class="name-col">Player</th>
-          {cols.map((c) => <th scope="col" class="n" title={COL_HELP[c]}>{c}</th>)}
+          {th("Player", -1)}
+          {cols.map((c, i) => th(c, i))}
         </tr></thead>
         {groups.map((g) => (
           <tbody class="board-group">
@@ -178,7 +193,7 @@ function Board({ heading, cols, colGroups, groups, onStat }: {
             {g.rows.length === 0 && (
               <tr><td colSpan={cols.length + 1} class="muted">Nobody played for this team.</td></tr>
             )}
-            {g.rows.map((r) => (
+            {(sort ? sortBoardRows(g.rows, sort.column, sort.direction) : g.rows).map((r) => (
               <tr>
                 <th scope="row" class="name-col">
                   <a href={playerHref(r.name)}>{r.leftEarly ? `(${r.name})` : r.name}</a>
@@ -236,24 +251,69 @@ function BoardNotes({ keyLine, brackets = false }: { keyLine: string | null; bra
   );
 }
 
-function Highlights({ records }: { records: { player_name: string }[] }) {
-  const hs = highlights(records as never);
+const highlightValue = (v: string) => /^\d+$/.test(v) ? num(Number(v)) : v;
+
+function HighlightList({ items, onPick }: { items: Highlight[]; onPick: (h: Highlight) => void }) {
+  return (
+    <dl class="highlights">
+      {items.map((h) => (
+        <div>
+          <dt><button class="highlight-pick" aria-haspopup="dialog"
+                      onClick={() => onPick(h)}>{h.label}
+            <svg class="highlight-open" viewBox="0 0 16 16" aria-hidden="true">
+              <path d="m6 3 5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </button></dt>
+          <dd>
+            {h.names.map((n, i) => <>{i > 0 && ", "}<a href={playerHref(n)}>{n}</a></>)}
+            {h.more > 0 && <span class="muted"> +{h.more} more</span>}
+            <span class="hl-value"> {highlightValue(h.value)}</span>
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function Highlights({ records, replay }: {
+  records: HighlightRecord[]; replay?: string | null;
+}) {
+  const [stats, error, loading] = useLoad(async () => replay ? await loadReplayStats(replay) : null, [replay]);
+  const [picked, setPicked] = useState<Highlight | null>(null);
+  const hs = highlights(records);
+  if (stats) hs.push(...replayHighlights(stats.kills, records));
   if (!hs.length) return null;
   return (
     <section class="card">
       <h2>Highlights</h2>
-      <dl class="highlights">
-        {hs.map((h) => (
-          <div>
-            <dt>{h.label}</dt>
-            <dd>
-              {h.names.map((n, i) => <>{i > 0 && ", "}<a href={playerHref(n)}>{n}</a></>)}
-              {h.more > 0 && <span class="muted"> +{h.more} more</span>}
-              <span class="hl-value"> {/^\d+$/.test(h.value) ? num(Number(h.value)) : h.value}</span>
-            </dd>
-          </div>
-        ))}
-      </dl>
+      {HIGHLIGHT_GROUPS.map((group) => {
+        const items = hs.filter((h) => h.group === group);
+        return items.length > 0 && <div class="highlight-group">
+          <h3>{group}</h3>
+          <HighlightList items={items} onPick={setPicked} />
+        </div>;
+      })}
+      {picked && <Modal title={picked.label} onClose={() => setPicked(null)}>
+        <p class="chart-note">All players in this match, highest to lowest.</p>
+        <div class="scroll">
+          <table class="data">
+            <thead><tr>
+              <th scope="col" class="n">#</th>
+              <th scope="col">Player</th>
+              <th scope="col" class="n">Value</th>
+            </tr></thead>
+            <tbody>
+              {picked.ranking.map((r, i) => <tr>
+                <td class="n">{i + 1}</td>
+                <th scope="row"><a href={playerHref(r.name)}>{r.name}</a></th>
+                <td class="n">{r.value == null ? <span class="muted">Not tracked</span> : highlightValue(r.value)}</td>
+              </tr>)}
+            </tbody>
+          </table>
+        </div>
+      </Modal>}
+      {replay && loading && <p class="muted">Loading replay highlights…</p>}
+      {error && <p class="warn">Replay highlights unavailable: {error.message}</p>}
     </section>
   );
 }

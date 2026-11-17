@@ -1,10 +1,10 @@
-import { useLayoutEffect, useRef, useState } from "preact/hooks";
+import { useState } from "preact/hooks";
 import { COL_HELP, type Cell } from "./board";
 import type { ChatRound, PlayerRow } from "./data";
 import { duration, fold, num } from "./format";
 import { loadReplayStats, minuteKills, playerKills, playerStreaks, type ReplayStats, type Versus } from "./killlog";
 import { playerHref } from "./router";
-import { Pills, Team, useLoad } from "./ui";
+import { Modal, Pills, Team, useLoad } from "./ui";
 
 const TITLES: Record<string, string> = {
   K: "Kills", D: "Deaths", TK: "Team kills", KS: "Longest kill streak",
@@ -134,22 +134,10 @@ export function MatchPlayerModal({ name, column, value, replay, rounds, fa, row,
   name: string; column: string; value: Cell; replay: string; rounds?: ChatRound[]; fa: number; row?: PlayerRow;
   onClose: () => void;
 }) {
-  const ref = useRef<HTMLDialogElement>(null);
   const [round, setRound] = useState("all");
   const unavailable = UNAVAILABLE[column];
   const [stats, error, loading] = useLoad<ReplayStats | null>(
     () => unavailable ? Promise.resolve(null) : loadReplayStats(replay), [replay, unavailable]);
-
-  useLayoutEffect(() => {
-    const d = ref.current;
-    if (!d) return;
-    d.addEventListener("close", onClose);
-    d.showModal();
-    return () => {
-      d.removeEventListener("close", onClose);
-      if (d.open) d.close();
-    };
-  }, [onClose]);
 
   const picked = round === "all" ? undefined : rounds?.[Number(round)];
   const window: [number, number] | undefined = picked ? [picked.start, picked.end ?? stats?.end ?? picked.start] : undefined;
@@ -157,16 +145,10 @@ export function MatchPlayerModal({ name, column, value, replay, rounds, fa, row,
   const byRound = !unavailable && column !== "Rep" && column !== "Brst";
 
   return (
-    <dialog ref={ref} class="vs-modal" aria-labelledby="vs-title"
-            onClick={(e) => { if (e.target === ref.current) onClose(); }}>
-      <div class="vs-body">
-        <header class="vs-head">
-          <h2 id="vs-title">
-            {row ? <Team side={row.freq === fa ? "a" : "b"}>{label}</Team> : label}
-            {" · "}{TITLES[column]}
-          </h2>
-          <button class="vs-close" onClick={onClose} aria-label="Close">×</button>
-        </header>
+    <Modal onClose={onClose} title={<>
+      {row ? <Team side={row.freq === fa ? "a" : "b"}>{label}</Team> : label}
+      {" · "}{TITLES[column]}
+    </>}>
         <p class="muted vs-sub">Scoreboard {column}: <b>{typeof value === "number" ? num(value) : value}</b>
           {" · "}<a href={playerHref(label)}>Career stats →</a></p>
         {unavailable ? <p>{unavailable} A player-by-player breakdown is unavailable.</p> : <>
@@ -184,7 +166,6 @@ export function MatchPlayerModal({ name, column, value, replay, rounds, fa, row,
             team kills, listed separately.</p>
         </>}
         <p class="chart-note">{COL_HELP[column]}</p>
-      </div>
-    </dialog>
+    </Modal>
   );
 }

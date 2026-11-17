@@ -437,9 +437,19 @@ table.data th.hl { color: var(--text); }
 .history { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
 
 .highlights { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 8px; margin: 0; }
-.highlights div { display: flex; flex-direction: column; gap: 2px; padding: 9px 12px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 9px; min-width: 0; }
+.highlight-group + .highlight-group { margin-top: 20px; }
+.highlight-group h3 { margin: 0 0 8px; }
+.highlights div { position: relative; display: flex; flex-direction: column; gap: 2px; padding: 9px 36px 9px 12px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 9px; min-width: 0; }
 .highlights dt { color: var(--muted); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; }
 .highlights dd { margin: 0; }
+.highlights dd a { position: relative; z-index: 1; }
+.highlight-pick { padding: 0; min-height: 0; border: 0; background: transparent; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; text-align: left; }
+.highlight-pick::after { content: ""; position: absolute; inset: 0; border-radius: 9px; }
+.highlight-pick:hover::after { box-shadow: inset 0 0 0 1px var(--line-strong); }
+.highlight-pick:focus-visible { outline: none; }
+.highlight-pick:focus-visible::after { outline: 2px solid var(--focus); outline-offset: 2px; }
+.highlight-open { position: absolute; right: 12px; top: 50%; width: 16px; height: 16px; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
+.highlight-pick:hover .highlight-open { color: var(--text); }
 .hl-value { font-weight: 800; font-variant-numeric: tabular-nums; }
 
 /* ---- charts (charts.tsx) ---- */
@@ -587,6 +597,7 @@ table.compare-careers thead th { text-transform: none; letter-spacing: 0; font-s
 /* ---- bases ---- */
 th button.sort { all: unset; cursor: pointer; }
 th button.sort:hover { text-decoration: underline; text-underline-offset: 3px; }
+th button.sort:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
 th[aria-sort] button.sort { color: var(--text); }
 th[aria-sort] button.sort::after { content: " ▾"; }
 th[aria-sort="ascending"] button.sort::after { content: " ▴"; }
@@ -651,7 +662,7 @@ table.data tr.me > td { background: color-mix(in srgb, var(--accent) 16%, var(--
   .banner-dash { font-size: 1.6rem; margin-top: 2.6rem; }
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .highlights { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
-  .highlights div { padding: 8px 10px; }
+  .highlights div { padding: 8px 30px 8px 10px; }
   .highlights dd { overflow-wrap: anywhere; }
   table.data th, table.data td { padding: 7px 8px; }
   .pills button { min-height: 36px; }
