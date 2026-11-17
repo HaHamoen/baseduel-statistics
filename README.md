@@ -25,6 +25,13 @@ The two are never added together: different arenas, different settings.
 - **Matches:** the full scoreboard the bot prints in game, the score after
   each round, a round timeline, and for league matches with a published
   replay, a base-control chart and the match's chat, linked to the replay.
+  Player names open career pages; supported scoreboard stat cells open focused
+  replay breakdowns: kills, deaths, team kills, reconstructed streaks, kills by
+  recording minute, and repel/burst use (with estimated burst victims).
+  Replay details are labelled separately from the bot's scoreboard totals.
+  Damage relationships, attach relationships and available/remaining item
+  counts are not in the available replay stats; those limitations are shown
+  explicitly rather than inventing player breakdowns.
 - **Leaderboards:** every board the bots offer in game, plus a time range and
   a minimum number of matches.
 - **Records:** most kills and damage in a match, longest streaks, winning

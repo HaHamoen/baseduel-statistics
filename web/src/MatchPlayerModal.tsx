@@ -1,37 +1,38 @@
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useLayoutEffect, useRef, useState } from "preact/hooks";
+import { COL_HELP, type Cell } from "./board";
 import type { ChatRound, PlayerRow } from "./data";
-import { fold, num, pyFixed } from "./format";
-import { loadKills, playerKills, type Kill, type Versus } from "./killlog";
+import { duration, fold, num } from "./format";
+import { loadReplayStats, minuteKills, playerKills, playerStreaks, type ReplayStats, type Versus } from "./killlog";
 import { playerHref } from "./router";
 import { Pills, Team, useLoad } from "./ui";
 
-const sortedWeapons = (w: Record<string, number>) => Object.entries(w).sort((a, b) => b[1] - a[1]);
+const TITLES: Record<string, string> = {
+  K: "Kills", D: "Deaths", TK: "Team kills", KS: "Longest kill streak",
+  "KS#": "Kill streaks of 10+", KSE: "Enemy streaks ended", KPM: "Kills by minute",
+  DG: "Damage given", DT: "Damage taken", Att: "Attaches", AtBy: "Attached to",
+  Rep: "Repels", Brst: "Bursts",
+};
 
-function Weapons({ label, weapons }: { label: string; weapons: Record<string, number> }) {
-  const list = sortedWeapons(weapons);
-  if (list.length === 0) return null;
-  return (
-    <p class="vs-weapons"><span class="muted">{label}</span>{" "}
-      {list.map(([w, n]) => <span class="chip">{w} <b>{num(n)}</b></span>)}
-    </p>
-  );
-}
+const UNAVAILABLE: Record<string, string> = {
+  DG: "Recordings contain no damage events. The bot stores total damage given, but not how much went to each player.",
+  DT: "Recordings contain no damage events. The bot stores total damage taken, but not how much came from each player.",
+  Att: "The bot stores the total attaches, but the available replay stats do not record whom you attached to.",
+  AtBy: "The bot stores the total times attached to, but the available replay stats do not record who attached to you.",
+};
 
-function VersusList({ title, empty, list, fa, onPick }: {
-  title: string; empty: string; list: Versus[]; fa: number; onPick: (name: string) => void;
-}) {
+function VersusList({ title, list, fa }: { title: string; list: Versus[]; fa: number }) {
   const max = list.reduce((m, v) => Math.max(m, v.n), 0);
   return (
     <section class="vs-col">
       <h3>{title} <span class="muted">{num(list.reduce((s, v) => s + v.n, 0))}</span></h3>
-      {list.length === 0 ? <p class="muted">{empty}</p> : (
+      {list.length === 0 ? <p class="muted">Nobody recorded.</p> : (
         <ol class="vs-list">
           {list.map((v) => (
-            <li title={sortedWeapons(v.weapons).map(([w, n]) => `${w} ${n}`).join(", ")}>
+            <li title={Object.entries(v.weapons).map(([w, n]) => `${w} ${n}`).join(", ")}>
               <Team side={v.freq === fa ? "a" : "b"}>
-                <button class="vs-name" onClick={() => onPick(v.name)}>{v.name}</button>
+                <a class="vs-name" href={playerHref(v.name)}>{v.name}</a>
               </Team>
-              <span class="vs-bar" aria-hidden="true"><span style={{ width: `${(100 * v.n) / max}%` }} /></span>
+              <span class="vs-bar" aria-hidden="true"><span style={{ width: `${100 * v.n / max}%` }} /></span>
               <b class="n">{num(v.n)}</b>
             </li>
           ))}
@@ -41,85 +42,148 @@ function VersusList({ title, empty, list, fa, onPick }: {
   );
 }
 
-function TeamKills({ label, list }: { label: string; list: Versus[] }) {
-  if (list.length === 0) return null;
+function ReplayDetail({ stats, name, column, window, fa }: {
+  stats: ReplayStats; name: string; column: string; window?: [number, number]; fa: number;
+}) {
+  const mine = playerKills(stats.kills, name, window);
+  if (column === "K" || column === "D" || column === "TK") return (
+    <>
+      {column === "K" && <VersusList title="Killed" list={mine.killed} fa={fa} />}
+      {column === "D" && <VersusList title="Killed by" list={mine.killedBy} fa={fa} />}
+      {column !== "D" && (column === "TK" || mine.teamKilled.length > 0) &&
+        <VersusList title="Team kills" list={mine.teamKilled} fa={fa} />}
+      {column === "D" && mine.teamKilledBy.length > 0 &&
+        <VersusList title="Killed by teammates" list={mine.teamKilledBy} fa={fa} />}
+    </>
+  );
+  if (column === "KS" || column === "KS#" || column === "KSE") {
+    const { streaks, ended } = playerStreaks(stats.kills, name, window);
+    const best = Math.max(0, ...streaks.map((s) => s.kills.length));
+    const list = column === "KSE" ? ended : streaks.filter((s) =>
+      column === "KS" ? s.kills.length === best : s.kills.length >= 10);
+    return (
+      <>
+        <p class="chart-note">Reconstructed enemy-kill streaks: team kills do not advance a streak; any death
+          ends it. These are not the bot's recorded streak counters. Selecting a round starts fresh at its boundary.</p>
+        {list.length === 0 && <p class="muted">No qualifying streaks in the replay.</p>}
+        {list.map((s) => (
+          <section class="vs-col">
+            <h3>{column === "KSE" ? `${s.kills[0].killer}'s` : ""} {num(s.kills.length)}-kill streak</h3>
+            <p class="muted">{duration(s.kills[0].t / 100)} – {duration(s.kills[s.kills.length - 1].t / 100)} into recording
+              {s.endedBy ? ` · Ended by ${s.endedBy.killer}` : " · No death recorded before the selection ended"}</p>
+            {column !== "KSE" && <VersusList title="Killed during streak"
+              list={playerKills(s.kills, name).killed} fa={fa} />}
+          </section>
+        ))}
+      </>
+    );
+  }
+  if (column === "KPM") {
+    const minutes = minuteKills(stats.kills, name, window ?? [0, stats.end]);
+    const full = minutes.filter((m) => m.end - m.start === 6000);
+    const ranked = [...full].sort((a, b) => a.kills - b.kills);
+    const quietest = ranked[0], busiest = ranked[ranked.length - 1];
+    const max = Math.max(0, ...minutes.map((m) => m.kills));
+    return (
+      <>
+        <p class="chart-note">Kills per recording minute, including team kills and quiet minutes.
+          This is wall-clock time, not the active-field-time KPM on the scoreboard. Times are into the recording.</p>
+        {full.length > 0 && <p>
+          Busiest full minute: <b>{duration(busiest.start / 100)} – {duration(busiest.end / 100)}</b>
+          {" "}({num(busiest.kills)} kills).
+          {" "}Quietest: <b>{duration(quietest.start / 100)} – {duration(quietest.end / 100)}</b>
+          {" "}({num(quietest.kills)} kills). Ties are possible; all minutes are below.
+        </p>}
+        {minutes.length === 0 && <p class="muted">No recording time in this selection.</p>}
+        <ol class="vs-list">
+          {minutes.map((m) => (
+            <li>
+              <span>{duration(m.start / 100)} – {duration(m.end / 100)}
+                {m.end - m.start < 6000 && " (partial)"}</span>
+              <span class="vs-bar" aria-hidden="true"><span style={{ width: `${max ? 100 * m.kills / max : 0}%` }} /></span>
+              <b class="n">{num(m.kills)}</b>
+            </li>
+          ))}
+        </ol>
+      </>
+    );
+  }
+  const player = stats.players.find((p) => fold(p.name) === fold(name));
+  if (!player) return <p class="warn">This player was not found in the replay stats.</p>;
+  const weapon = column === "Rep" ? "repel" : "burst";
+  const used = player.shots[weapon] ?? 0;
+  const burst = playerKills(stats.kills.filter((k) => k.weapon === "burst"), name);
   return (
-    <p class="vs-weapons"><span class="muted">{label}</span>{" "}
-      {list.map((v) => <span class="chip">{v.name} <b>{num(v.n)}</b></span>)}
-    </p>
+    <>
+      <p>Used in the whole recording: <b>{num(used)}</b> {column === "Rep" ? "repels" : "bursts"}.</p>
+      <p class="chart-note">The replay counts weapon-use frames. It does not record how many items the
+        player had available, so available, remaining and usage percentages cannot be shown.</p>
+      {column === "Brst" && <>
+        <VersusList title="Kills attributed to bursts" list={burst.killed} fa={fa} />
+        {burst.teamKilled.length > 0 && <VersusList title="Team kills attributed to bursts" list={burst.teamKilled} fa={fa} />}
+        <p class="chart-note">Weapon attribution is an estimate based on the killer's most recent
+          eligible shot, not confirmed damage events.</p>
+      </>}
+    </>
   );
 }
 
 const roundLabel = (r: ChatRound) => `R${r.round}${r.attempt > 1 ? `.${r.attempt}` : ""}`;
 
-/** One player's night in one league match: who they killed and who killed
- * them, from the replay's kill log, for the whole match or a single round. */
-export function MatchPlayerModal({ name, replay, rounds, fa, row, onPick, onClose }: {
-  name: string; replay: string; rounds: ChatRound[] | undefined; fa: number; row?: PlayerRow;
-  onPick: (name: string) => void; onClose: () => void;
+export function MatchPlayerModal({ name, column, value, replay, rounds, fa, row, onClose }: {
+  name: string; column: string; value: Cell; replay: string; rounds?: ChatRound[]; fa: number; row?: PlayerRow;
+  onClose: () => void;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const [round, setRound] = useState("all");
-  const [kills, error, loading] = useLoad<Kill[]>(() => loadKills(replay), [replay]);
+  const unavailable = UNAVAILABLE[column];
+  const [stats, error, loading] = useLoad<ReplayStats | null>(
+    () => unavailable ? Promise.resolve(null) : loadReplayStats(replay), [replay, unavailable]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const d = ref.current;
-    if (d && !d.open) d.showModal();
-    return () => { if (d?.open) d.close(); };
-  }, []);
-  // another player picked inside the modal: back to the whole match
-  useEffect(() => setRound("all"), [name]);
+    if (!d) return;
+    d.addEventListener("close", onClose);
+    d.showModal();
+    return () => {
+      d.removeEventListener("close", onClose);
+      if (d.open) d.close();
+    };
+  }, [onClose]);
 
   const picked = round === "all" ? undefined : rounds?.[Number(round)];
-  const window: [number, number] | undefined = picked ? [picked.start, picked.end ?? Infinity] : undefined;
-  const mine = kills ? playerKills(kills, name, window) : null;
-  const freq = row?.freq ?? kills?.find((k) => fold(k.killer) === fold(name))?.killerFreq;
+  const window: [number, number] | undefined = picked ? [picked.start, picked.end ?? stats?.end ?? picked.start] : undefined;
   const label = row?.player_name ?? name;
-  const sum = (l: Versus[]) => l.reduce((n, v) => n + v.n, 0);
-  const tkOut = mine ? sum(mine.teamKilled) : 0;
-  const tkIn = mine ? sum(mine.teamKilledBy) : 0;
+  const byRound = !unavailable && column !== "Rep" && column !== "Brst";
 
   return (
-    <dialog ref={ref} class="vs-modal" aria-labelledby="vs-title" onClose={onClose}
-            onClick={(e) => { if (e.target === ref.current) ref.current?.close(); }}>
+    <dialog ref={ref} class="vs-modal" aria-labelledby="vs-title"
+            onClick={(e) => { if (e.target === ref.current) onClose(); }}>
       <div class="vs-body">
         <header class="vs-head">
           <h2 id="vs-title">
-            {freq != null ? <Team side={freq === fa ? "a" : "b"}>{label}</Team> : label}
+            {row ? <Team side={row.freq === fa ? "a" : "b"}>{label}</Team> : label}
+            {" · "}{TITLES[column]}
           </h2>
-          <button class="vs-close" onClick={() => ref.current?.close()} aria-label="Close">×</button>
+          <button class="vs-close" onClick={onClose} aria-label="Close">×</button>
         </header>
-        <p class="muted vs-sub">
-          {row && <>Scoreboard: {num(row.kills)} K · {num(row.deaths)} D · </>}
-          <a href={playerHref(label)}>Career stats →</a>
-        </p>
-        {rounds && rounds.length > 0 && (
-          <div class="scroll">
-            <Pills label="Round" value={round} onChange={setRound}
-                   options={[["all", "Whole match"], ...rounds.map((r, i): [string, string] => [String(i), roundLabel(r)])]} />
-          </div>
-        )}
-        {loading && <p class="muted">Loading the replay's kill log…</p>}
-        {error && <p class="warn">{error.message}. The replay's site may be down; the career page still works.</p>}
-        {mine && (
-          <>
-            <p class="vs-totals">
-              <b>{num(mine.kills + tkOut)}</b> kills · <b>{num(mine.deaths + tkIn)}</b> deaths
-              {mine.deaths + tkIn > 0 && <> · K/D <b>{pyFixed((mine.kills + tkOut) / (mine.deaths + tkIn), 2)}</b></>}
-            </p>
-            <div class="vs-grid">
-              <VersusList title="Killed" empty="Nobody." list={mine.killed} fa={fa} onPick={onPick} />
-              <VersusList title="Killed by" empty="Nobody." list={mine.killedBy} fa={fa} onPick={onPick} />
+        <p class="muted vs-sub">Scoreboard {column}: <b>{typeof value === "number" ? num(value) : value}</b>
+          {" · "}<a href={playerHref(label)}>Career stats →</a></p>
+        {unavailable ? <p>{unavailable} A player-by-player breakdown is unavailable.</p> : <>
+          {byRound && rounds && rounds.length > 0 && (
+            <div class="scroll">
+              <Pills label="Round" value={round} onChange={setRound}
+                     options={[["all", "Whole recording"], ...rounds.map((r, i): [string, string] => [String(i), roundLabel(r)])]} />
             </div>
-            <Weapons label="Killed with" weapons={mine.weaponsOut} />
-            <Weapons label="Killed by" weapons={mine.weaponsIn} />
-            <TeamKills label="Team kills" list={mine.teamKilled} />
-            <TeamKills label="Killed by teammates" list={mine.teamKilledBy} />
-            <p class="chart-note">From the replay's kill log, as the scoreboard counts: kills and deaths include
-              team kills, which the lists leave out. Over the whole recording, so a round's numbers can include
-              a kill between rounds.</p>
-          </>
-        )}
+          )}
+          {loading && <p class="muted">Loading replay stats…</p>}
+          {error && <p class="warn">{error.message}. The career page still works.</p>}
+          {stats && <ReplayDetail stats={stats} name={name} column={column} window={window} fa={fa} />}
+          <p class="chart-note">Replay-derived details, not a replacement for the bot's scoreboard.
+            The whole recording includes time between rounds; totals can differ. Kills and deaths include
+            team kills, listed separately.</p>
+        </>}
+        <p class="chart-note">{COL_HELP[column]}</p>
       </div>
     </dialog>
   );

@@ -696,7 +696,10 @@ table.data tr.me > td { background: color-mix(in srgb, var(--accent) 16%, var(--
 .board-table:has(:is(td,th):nth-child(17):hover) thead th:nth-child(17) { color: var(--text); }
 }
 
-/* A player's kills in one match (MatchPlayerModal): a native <dialog>. */
+/* Match stat drilldowns use a native <dialog>. */
+.board-table button.stat-detail { padding: 0; min-height: 0; border: 0; border-radius: 0; background: transparent; color: inherit; font: inherit; text-decoration: underline dotted var(--muted); text-underline-offset: 3px; }
+.board-table button.stat-detail:hover { color: var(--link); text-decoration-style: solid; }
+.board-table button.stat-detail:focus-visible { outline: 2px solid var(--accent-edge); outline-offset: 3px; }
 .vs-modal { width: min(760px, calc(100vw - 24px)); max-height: calc(100vh - 32px); padding: 0; border: 1px solid var(--line-strong); border-radius: 14px; background: var(--surface); color: var(--text); box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.55); }
 .vs-modal::backdrop { background: rgba(5, 6, 8, 0.6); }
 .vs-body { padding: 18px 20px 20px; display: grid; gap: 12px; }
@@ -704,9 +707,7 @@ table.data tr.me > td { background: color-mix(in srgb, var(--accent) 16%, var(--
 .vs-head h2 { margin: 0; }
 .vs-close { border: 0; background: transparent; color: var(--text-2); font-size: 1.8rem; line-height: 1; min-width: 40px; min-height: 40px; border-radius: 8px; cursor: pointer; }
 .vs-close:hover { background: var(--hover); }
-.vs-sub, .vs-totals, .vs-weapons { margin: 0; }
-.vs-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
-@media (max-width: 620px) { .vs-grid { grid-template-columns: 1fr; } }
+.vs-sub { margin: 0; }
 .vs-col h3 { margin: 0 0 8px; }
 .vs-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .vs-list li { display: grid; grid-template-columns: minmax(0, 9em) 1fr 2.5em; align-items: center; gap: 8px; padding: 3px 0; }

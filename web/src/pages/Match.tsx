@@ -80,9 +80,7 @@ function OwnMatch({ section, doc }: { section: Section; doc: MatchDoc }) {
   const counted = rounds.filter((r) => r.counted).length;
   const caps = [...players].sort((x, y) => x.freq - y.freq).filter((p) => p.is_captain).map((p) => p.player_name);
   const mode = modeLine(m);
-  // A name opens that player's kills in this match, when the replay is published
-  const [who, setWho] = useState<string | null>(null);
-  const openPlayer = m.replay ? setWho : undefined;
+  const [stat, setStat] = useState<{ name: string; column: string; value: Cell } | null>(null);
   return (
     <>
       <header class="page-head">
@@ -103,14 +101,16 @@ function OwnMatch({ section, doc }: { section: Section; doc: MatchDoc }) {
 
       {players.length > 0 && (
         <section class="card">
-          <Board heading="Scoreboard" cols={SB_COLS} colGroups={SB_GROUPS} groups={groups} onPlayer={openPlayer} />
+          <Board heading="Scoreboard" cols={SB_COLS} colGroups={SB_GROUPS} groups={groups}
+                 onStat={m.replay ? (name, column, value) => setStat({ name, column, value }) : undefined} />
           <BoardNotes keyLine={markerKey(players, m.winner_freq)} />
         </section>
       )}
-      {who && m.replay && (
-        <MatchPlayerModal name={who} replay={m.replay} rounds={doc.chat?.rounds} fa={fa}
-                          row={players.find((p) => fold(p.player_name) === fold(who))}
-                          onPick={setWho} onClose={() => setWho(null)} />
+      {stat && m.replay && (
+        <MatchPlayerModal key={`${stat.name}:${stat.column}`} name={stat.name} column={stat.column} value={stat.value}
+                          replay={m.replay} rounds={doc.chat?.rounds} fa={fa}
+                          row={players.find((p) => fold(p.player_name) === fold(stat.name))}
+                          onClose={() => setStat(null)} />
       )}
       {players.length > 0 && <Highlights records={players} />}
       <Rounds rounds={rounds} names={names} fa={fa} roundPlayers={roundPlayers} control={doc.control?.rounds} />
@@ -137,10 +137,11 @@ function useDensity(): [Density, (d: Density) => void] {
   }];
 }
 
-function Board({ heading, cols, colGroups, groups, onPlayer }: {
+const DETAIL_COLS = new Set(["K", "D", "TK", "KS", "KS#", "KSE", "KPM", "DG", "DT", "Att", "AtBy", "Rep", "Brst"]);
+
+function Board({ heading, cols, colGroups, groups, onStat }: {
   heading: string; cols: string[]; colGroups: ColGroup[]; groups: BoardGroup[];
-  /** Plain-clicking a name does this instead of opening the career page. */
-  onPlayer?: (name: string) => void;
+  onStat?: (name: string, column: string, value: Cell) => void;
 }) {
   const [density, setDensity] = useDensity();
   // Only when the families cover the columns exactly: a mismatch would draw
@@ -180,15 +181,16 @@ function Board({ heading, cols, colGroups, groups, onPlayer }: {
             {g.rows.map((r) => (
               <tr>
                 <th scope="row" class="name-col">
-                  <a href={playerHref(r.name)} title={onPlayer ? "Kills and deaths in this match" : undefined}
-                     onClick={onPlayer && ((e) => {
-                       if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-                       e.preventDefault();
-                       onPlayer(r.name);
-                     })}>{r.leftEarly ? `(${r.name})` : r.name}</a>
+                  <a href={playerHref(r.name)}>{r.leftEarly ? `(${r.name})` : r.name}</a>
                   {r.marker && <span class="marker" title={MARKERS[r.marker]}> *{r.marker}</span>}
                 </th>
-                {r.cells.map((c) => <td class="n">{fmtCell(c)}</td>)}
+                {r.cells.map((c, i) => <td class="n">
+                  {onStat && DETAIL_COLS.has(cols[i]) ? (
+                    <button class="stat-detail" aria-label={`${r.name}: ${COL_HELP[cols[i]]}`}
+                            title={`View ${cols[i]} details for ${r.name}`}
+                            onClick={() => onStat(r.name, cols[i], c)}>{fmtCell(c)}</button>
+                  ) : fmtCell(c)}
+                </td>)}
               </tr>
             ))}
             {g.team && (

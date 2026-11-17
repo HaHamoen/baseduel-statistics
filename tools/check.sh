@@ -16,6 +16,7 @@ python3 tests/test_export.py
 web/node_modules/.bin/tsc -p web --noEmit && echo "typecheck: ok"
 node web/tools/control-rounds.test.mjs
 node web/tools/chat.test.mjs
+node web/tools/killlog.test.mjs
 if [ -f .snap/pubduel.db ] && [ -f .snap/baseduel.db ]; then
   control=()
   if [ -n "${REPLAYS_DATA:-}" ]; then

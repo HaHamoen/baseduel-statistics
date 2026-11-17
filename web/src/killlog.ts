@@ -16,8 +16,15 @@ interface RawKill {
 }
 
 interface RawStats {
-  players: { player: number; name: string }[];
+  source: { endTick: number };
+  players: { player: number; name: string; shots: Record<string, number> }[];
   killLog: RawKill[];
+}
+
+export interface ReplayStats {
+  end: number;
+  players: RawStats["players"];
+  kills: Kill[];
 }
 
 export interface Kill {
@@ -51,7 +58,7 @@ export interface PlayerKills {
   weaponsIn: Record<string, number>;
 }
 
-const cache = new Map<string, Promise<Kill[]>>();
+const cache = new Map<string, Promise<ReplayStats>>();
 
 /** The replay's id from the match's replay link (https://host/r/<id>). */
 export function replayParts(replay: string | null): { origin: string; id: string } | null {
@@ -65,8 +72,8 @@ export function replayParts(replay: string | null): { origin: string; id: string
   }
 }
 
-/** One match's kills, fetched once. */
-export function loadKills(replay: string): Promise<Kill[]> {
+/** One recording's stats, fetched once. */
+export function loadReplayStats(replay: string): Promise<ReplayStats> {
   const parts = replayParts(replay);
   if (!parts) return Promise.reject(new Error("No replay for this match"));
   const url = `${parts.origin}/data/${encodeURIComponent(parts.id)}.stats.json`;
@@ -76,7 +83,7 @@ export function loadKills(replay: string): Promise<Kill[]> {
       if (!r.ok) throw new Error(`The replay's kill log is not available (${r.status})`);
       const raw = (await r.json()) as RawStats;
       const names = new Map(raw.players.map((x) => [x.player, x.name]));
-      return raw.killLog.map((k) => ({
+      const kills = raw.killLog.map((k) => ({
         t: k.t,
         killer: names.get(k.killer) ?? "?",
         killed: names.get(k.killed) ?? "?",
@@ -85,6 +92,7 @@ export function loadKills(replay: string): Promise<Kill[]> {
         killerFreq: k.killerFreq,
         killedFreq: k.killedFreq,
       }));
+      return { end: raw.source.endTick, players: raw.players, kills };
     });
     p.catch(() => cache.delete(url));
     cache.set(url, p);
@@ -140,4 +148,49 @@ export function playerKills(kills: Kill[], name: string, window?: [number, numbe
   out.teamKilled = sorted(tallies.teamKilled);
   out.teamKilledBy = sorted(tallies.teamKilledBy);
   return out;
+}
+
+export interface Streak {
+  kills: Kill[];
+  endedBy?: Kill;
+}
+
+/** Reconstructed enemy-kill streaks, not the bot's recorded streak counters.
+ * Any death resets a streak; team kills do not advance it. */
+export function playerStreaks(kills: Kill[], name: string, window?: [number, number]) {
+  const active = new Map<string, Kill[]>();
+  const streaks: Streak[] = [];
+  for (const k of [...kills].sort((a, b) => a.t - b.t)) {
+    if (window && (k.t < window[0] || k.t >= window[1])) continue;
+    const killer = fold(k.killer), killed = fold(k.killed);
+    const ended = active.get(killed);
+    if (ended?.length) streaks.push({ kills: ended, endedBy: k });
+    active.delete(killed);
+    if (killer === killed || k.teamKill) continue;
+    const run = active.get(killer) ?? [];
+    run.push(k);
+    active.set(killer, run);
+  }
+  for (const run of active.values()) streaks.push({ kills: run });
+  const me = fold(name);
+  return {
+    streaks: streaks.filter((s) => fold(s.kills[0].killer) === me),
+    ended: streaks.filter((s) => s.kills.length >= 10 && s.endedBy &&
+      !s.endedBy.teamKill && fold(s.endedBy.killer) === me && fold(s.endedBy.killed) !== me),
+  };
+}
+
+/** Wall-clock recording minutes, including quiet minutes and a partial last
+ * minute. These are counts, not the bot's active-field-time KPM. */
+export function minuteKills(kills: Kill[], name: string, window: [number, number]) {
+  const [start, end] = window;
+  const buckets = Array.from({ length: Math.ceil(Math.max(0, end - start) / 6000) }, (_, i) => ({
+    start: start + i * 6000, end: Math.min(end, start + (i + 1) * 6000), kills: 0,
+  }));
+  const me = fold(name);
+  for (const k of kills) {
+    if (k.t < start || k.t >= end || fold(k.killer) !== me || fold(k.killed) === me) continue;
+    buckets[Math.floor((k.t - start) / 6000)].kills++;
+  }
+  return buckets;
 }
