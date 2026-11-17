@@ -322,8 +322,10 @@ table.data thead th {
   font-size: 0.72rem; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em;
   border-bottom: 2px solid var(--line-strong); white-space: nowrap; padding-top: 6px; padding-bottom: 7px; background: var(--surface);
 }
-table.data thead th[title] { cursor: help; text-decoration: underline dotted; text-decoration-color: var(--line-strong); text-underline-offset: 4px; }
-table.data thead th[title]:hover { color: var(--text); }
+table.data thead th:is([title], [data-tip]) { cursor: help; text-decoration: underline dotted; text-decoration-color: var(--line-strong); text-underline-offset: 4px; }
+table.data thead th:is([title], [data-tip]):hover { color: var(--text); }
+.tip { position: fixed; z-index: 1000; max-width: min(280px, calc(100vw - 16px)); padding: 6px 10px; border-radius: 8px; background: var(--head-bg); color: #f2f5fa; border: 1px solid var(--head-field-line); box-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.6); font-size: 0.85rem; font-weight: 500; line-height: 1.35; text-transform: none; letter-spacing: 0; pointer-events: none; }
+.tip[hidden] { display: none; }
 table.data .n { text-align: right; white-space: nowrap; }
 table.data .c { text-align: center; }
 table.data tbody tr:hover > * { background: var(--hover); }
@@ -693,3 +695,24 @@ table.data tr.me > td { background: color-mix(in srgb, var(--accent) 16%, var(--
 .board-table:has(:is(td,th):nth-child(16):hover) thead th:nth-child(16),
 .board-table:has(:is(td,th):nth-child(17):hover) thead th:nth-child(17) { color: var(--text); }
 }
+
+/* A player's kills in one match (MatchPlayerModal): a native <dialog>. */
+.vs-modal { width: min(760px, calc(100vw - 24px)); max-height: calc(100vh - 32px); padding: 0; border: 1px solid var(--line-strong); border-radius: 14px; background: var(--surface); color: var(--text); box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.55); }
+.vs-modal::backdrop { background: rgba(5, 6, 8, 0.6); }
+.vs-body { padding: 18px 20px 20px; display: grid; gap: 12px; }
+.vs-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.vs-head h2 { margin: 0; }
+.vs-close { border: 0; background: transparent; color: var(--text-2); font-size: 1.8rem; line-height: 1; min-width: 40px; min-height: 40px; border-radius: 8px; cursor: pointer; }
+.vs-close:hover { background: var(--hover); }
+.vs-sub, .vs-totals, .vs-weapons { margin: 0; }
+.vs-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+@media (max-width: 620px) { .vs-grid { grid-template-columns: 1fr; } }
+.vs-col h3 { margin: 0 0 8px; }
+.vs-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.vs-list li { display: grid; grid-template-columns: minmax(0, 9em) 1fr 2.5em; align-items: center; gap: 8px; padding: 3px 0; }
+.vs-list .n { text-align: right; }
+.vs-name { border: 0; background: transparent; padding: 0; font: inherit; font-weight: 600; color: inherit; cursor: pointer; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.vs-name:hover { text-decoration: underline; }
+.vs-bar { height: 8px; background: var(--surface-2); border-radius: 4px; overflow: hidden; }
+.vs-bar > span { display: block; height: 100%; background: var(--accent-edge); border-radius: 4px; }
+.chip { display: inline-block; margin: 2px 4px 2px 0; padding: 1px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-2); font-size: 0.85rem; }

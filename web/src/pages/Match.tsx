@@ -9,8 +9,9 @@ import {
   type NeobotLineRow, type NeobotPlayerRow, type PlayerRow, type RoundRow, type Section,
 } from "../data";
 import { chatCounts, chatTimeline } from "../chat";
-import { dateTime, duration, num } from "../format";
+import { dateTime, duration, fold, num } from "../format";
 import { freqsOf, kindLabel, modeLine, outcomeWord, teamNames } from "../matchinfo";
+import { MatchPlayerModal } from "../MatchPlayerModal";
 import { playerHref } from "../router";
 import { Loading, Pills, Problem, Team, useLoad, useTitle } from "../ui";
 
@@ -79,6 +80,9 @@ function OwnMatch({ section, doc }: { section: Section; doc: MatchDoc }) {
   const counted = rounds.filter((r) => r.counted).length;
   const caps = [...players].sort((x, y) => x.freq - y.freq).filter((p) => p.is_captain).map((p) => p.player_name);
   const mode = modeLine(m);
+  // A name opens that player's kills in this match, when the replay is published
+  const [who, setWho] = useState<string | null>(null);
+  const openPlayer = m.replay ? setWho : undefined;
   return (
     <>
       <header class="page-head">
@@ -99,9 +103,14 @@ function OwnMatch({ section, doc }: { section: Section; doc: MatchDoc }) {
 
       {players.length > 0 && (
         <section class="card">
-          <Board heading="Scoreboard" cols={SB_COLS} colGroups={SB_GROUPS} groups={groups} />
+          <Board heading="Scoreboard" cols={SB_COLS} colGroups={SB_GROUPS} groups={groups} onPlayer={openPlayer} />
           <BoardNotes keyLine={markerKey(players, m.winner_freq)} />
         </section>
+      )}
+      {who && m.replay && (
+        <MatchPlayerModal name={who} replay={m.replay} rounds={doc.chat?.rounds} fa={fa}
+                          row={players.find((p) => fold(p.player_name) === fold(who))}
+                          onPick={setWho} onClose={() => setWho(null)} />
       )}
       {players.length > 0 && <Highlights records={players} />}
       <Rounds rounds={rounds} names={names} fa={fa} roundPlayers={roundPlayers} control={doc.control?.rounds} />
@@ -128,8 +137,10 @@ function useDensity(): [Density, (d: Density) => void] {
   }];
 }
 
-function Board({ heading, cols, colGroups, groups }: {
+function Board({ heading, cols, colGroups, groups, onPlayer }: {
   heading: string; cols: string[]; colGroups: ColGroup[]; groups: BoardGroup[];
+  /** Plain-clicking a name does this instead of opening the career page. */
+  onPlayer?: (name: string) => void;
 }) {
   const [density, setDensity] = useDensity();
   // Only when the families cover the columns exactly: a mismatch would draw
@@ -169,7 +180,12 @@ function Board({ heading, cols, colGroups, groups }: {
             {g.rows.map((r) => (
               <tr>
                 <th scope="row" class="name-col">
-                  <a href={playerHref(r.name)}>{r.leftEarly ? `(${r.name})` : r.name}</a>
+                  <a href={playerHref(r.name)} title={onPlayer ? "Kills and deaths in this match" : undefined}
+                     onClick={onPlayer && ((e) => {
+                       if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                       e.preventDefault();
+                       onPlayer(r.name);
+                     })}>{r.leftEarly ? `(${r.name})` : r.name}</a>
                   {r.marker && <span class="marker" title={MARKERS[r.marker]}> *{r.marker}</span>}
                 </th>
                 {r.cells.map((c) => <td class="n">{fmtCell(c)}</td>)}
