@@ -1,5 +1,6 @@
 # Rebuild the stats site from the bots' databases and deploy it when it
 # changed (tools/refresh.sh). Started by bd-stats-refresh.timer.
+# Paths and User= are examples: edit them for your server (tools/SETUP.md).
 [Unit]
 Description=bd-stats: refresh the stats site from the bots' databases
 After=network-online.target

@@ -1,6 +1,7 @@
 # Refresh the site soon after a league match: tools/refresh.sh with
 # TRIGGER=league, started by bd-stats-league.path. It goes on only for a new
 # league match or replay, and waits for a run already going.
+# Paths and User= are examples: edit them for your server (tools/SETUP.md).
 [Unit]
 Description=bd-stats: refresh the stats site after a league match
 After=network-online.target

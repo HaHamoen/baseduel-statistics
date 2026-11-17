@@ -3,6 +3,7 @@
 # ss-replay publishes a replay (its index: the match page gets its link).
 # A write while that service is running starts nothing more; the timer is the
 # backstop for it.
+# Paths and User= are examples: edit them for your server (tools/SETUP.md).
 [Unit]
 Description=bd-stats: watch the league database for a finished match
 
