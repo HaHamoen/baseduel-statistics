@@ -473,6 +473,56 @@ class TestMatches(ExportCase):
         self.assertEqual(values["Most kills in a minute"], "3")
         self.assertEqual(values["Most kills in a minute without dying"], "3")
         self.assertEqual(values["Most enemy kills before dying"], "4")
+        minute = next(h for h in highlights if h["label"] == "Most kills in a minute")
+        self.assertEqual(minute["ranking"][0]["moments"],
+                         [{"start": 5400, "end": 11899}])
+
+    def test_replay_moments_preserve_death_and_team_kill_boundaries(self):
+        events = [
+            (100, "Ann", "Bob", False), (200, "Bob", "Ann", False),
+            (300, "Cy", "ANN", True), (400, "Ann", "Ann", True),
+            (500, "ANN", "Cy", True), (600, "Bob", "Ann", False),
+            (700, "Ann", "Bob", False), (800, "Bob", "Ann", False),
+        ]
+        kills = [{"t": t + 10000, "killer": killer, "killed": killed,
+                  "teamKill": team_kill}
+                 for t, killer, killed, team_kill in events]
+        hs = {h["label"]: h for h in
+              ex.replay_highlights(list(reversed(kills)), [
+                  {"player_name": "Ann"}, {"player_name": "Nobody"}])}
+        expected = {
+            "Most kills in a minute": ("3", 9600, 10700),
+            "Most deaths in a minute": ("5", 9700, 10800),
+            "Most enemy kills before dying": ("1", 9600, 10100),
+            "Most deaths before a kill": ("4", 9700, 10600),
+            "Most kills in a minute without dying": ("1", 9600, 10100),
+            "Most deaths in a minute without killing": ("3", 9700, 10400),
+        }
+        for label, (value, start, end) in expected.items():
+            row, zero = hs[label]["ranking"]
+            self.assertEqual(row["value"], value, label)
+            self.assertEqual(row["moments"], [{"start": start, "end": end}], label)
+            self.assertNotIn("moments", zero)
+        early = ex.replay_highlights([
+            {"t": 0, "killer": "Ann", "killed": "Bob", "teamKill": False}],
+            [{"player_name": "Ann"}])
+        self.assertEqual(early[0]["ranking"][0]["moments"],
+                         [{"start": 0, "end": 0}])
+
+    def test_streak_end_moments_include_each_enemy_ending_not_team_kills(self):
+        kills = []
+        for start, killer, killed, team_kill in [
+                (0, "ANN", "Bob", False), (2000, "Ann", "BOB", True),
+                (4000, "Bob", "Bob", True), (6000, "ann", "Bob", False)]:
+            kills.extend({"t": start + i * 100, "killer": "Bob",
+                          "killed": "Victim", "teamKill": False}
+                         for i in range(10))
+            kills.append({"t": start + 1000, "killer": killer,
+                          "killed": killed, "teamKill": team_kill})
+        self.assertEqual(ex.streak_end_moments(list(reversed(kills))), {"ann": [
+            {"start": 500, "end": 1000, "label": "Ended Bob's 10-kill streak"},
+            {"start": 6500, "end": 7000, "label": "Ended Bob's 10-kill streak"},
+        ]})
 
     def test_play_time_leaves_out_holds_and_gaps(self):
         m = self.pub.match(length=1000.0, held_seconds=100.0,

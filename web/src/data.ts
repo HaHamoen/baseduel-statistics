@@ -272,6 +272,12 @@ export interface ReplayPlayer {
   name: string;
   shots: Record<string, number>;
 }
+/** Recording ticks; start includes a short lead-in before the event. */
+export interface ReplayMoment {
+  start: number;
+  end: number;
+  label?: string;
+}
 export interface ReplayHighlight {
   group: "Kills" | "Deaths" | "Movement";
   label: string;
@@ -279,7 +285,12 @@ export interface ReplayHighlight {
   names: string[];
   more: number;
   description?: string;
-  ranking: { name: string; value: string | null; run?: { start: number; end: number; seconds: number } }[];
+  ranking: {
+    name: string;
+    value: string | null;
+    run?: { start: number; end: number; seconds: number };
+    moments?: ReplayMoment[];
+  }[];
 }
 /** Replay stats embedded by the exporter; the page never fetches ss-replay. */
 export interface ReplayStats {
@@ -288,6 +299,7 @@ export interface ReplayStats {
   kills: ReplayKill[];
   breakdowns: Record<string, PlayerKillBreakdown>;
   highlights: ReplayHighlight[];
+  streakEnds?: Record<string, ReplayMoment[]>;
 }
 export interface PlayerKillBreakdown {
   killed: Versus[];

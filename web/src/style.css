@@ -451,6 +451,9 @@ table.data th.hl { color: var(--text); }
 .highlight-open { position: absolute; right: 12px; top: 50%; width: 16px; height: 16px; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
 .highlight-pick:hover .highlight-open { color: var(--text); }
 .hl-value { font-weight: 800; font-variant-numeric: tabular-nums; }
+.highlight-replay { display: inline-block; margin-left: 6px; padding: 1px 5px; border: 1px solid currentColor; border-radius: 4px; font-size: 0.6rem; color: var(--team-a); }
+.replay-moments { list-style: none; padding: 0; margin: 0; }
+.replay-moments li + li { margin-top: 6px; }
 
 /* ---- charts (charts.tsx) ---- */
 .chart { position: relative; margin: 10px 0 4px; }

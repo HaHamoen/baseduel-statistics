@@ -7,7 +7,7 @@ import {
 } from "../board";
 import {
   getMatch, getMeta, getNeobotMatch, isNeobotId, rows, type ChatDoc, type ControlRound, type MatchDoc, type NeobotDoc,
-  type NeobotLineRow, type NeobotPlayerRow, type PlayerRow, type RoundRow, type Section,
+  type NeobotLineRow, type NeobotPlayerRow, type PlayerRow, type ReplayMoment, type RoundRow, type Section,
 } from "../data";
 import { chatCounts, chatTimeline } from "../chat";
 import { dateTime, duration, fold, num } from "../format";
@@ -115,7 +115,7 @@ function OwnMatch({ section, doc }: { section: Section; doc: MatchDoc }) {
       )}
       {players.length > 0 && <Highlights records={players}
         replayHighlights={[...(doc.stats?.highlights ?? []), ...(doc.control?.highlights ?? [])]}
-        replay={m.replay} />}
+        streakEnds={doc.stats?.streakEnds} replay={m.replay} />}
       <Rounds rounds={rounds} names={names} fa={fa} roundPlayers={roundPlayers} control={doc.control?.rounds} />
       {doc.chat && <Chat chat={doc.chat} rounds={rounds} names={names} fa={fa} replay={m.replay} />}
     </>
@@ -253,14 +253,19 @@ function BoardNotes({ keyLine, brackets = false }: { keyLine: string | null; bra
 }
 
 const highlightValue = (v: string) => /^\d+$/.test(v) ? num(Number(v)) : v;
+const hasReplayMoments = (h: Highlight) => h.ranking.some((r) => r.run || r.moments?.length);
 
-function HighlightList({ items, onPick }: { items: Highlight[]; onPick: (h: Highlight) => void }) {
+function HighlightList({ items, replay, onPick }: {
+  items: Highlight[]; replay?: string | null; onPick: (h: Highlight) => void;
+}) {
   return (
     <dl class="highlights">
       {items.map((h) => (
         <div>
           <dt><button class="highlight-pick" aria-haspopup="dialog"
                       onClick={() => onPick(h)}>{h.label}
+            {replay && hasReplayMoments(h) && <span class="highlight-replay"
+              title="Replay moments available">Replay</span>}
             <svg class="highlight-open" viewBox="0 0 16 16" aria-hidden="true">
               <path d="m6 3 5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
@@ -276,11 +281,12 @@ function HighlightList({ items, onPick }: { items: Highlight[]; onPick: (h: High
   );
 }
 
-function Highlights({ records, replayHighlights, replay }: {
+function Highlights({ records, replayHighlights, streakEnds, replay }: {
   records: HighlightRecord[]; replayHighlights?: Highlight[]; replay?: string | null;
+  streakEnds?: Record<string, ReplayMoment[]>;
 }) {
   const [picked, setPicked] = useState<Highlight | null>(null);
-  const hs = highlights(records);
+  const hs = highlights(records, streakEnds);
   if (replayHighlights) hs.push(...replayHighlights);
   if (!hs.length) return null;
   return (
@@ -290,7 +296,7 @@ function Highlights({ records, replayHighlights, replay }: {
         const items = hs.filter((h) => h.group === group);
         return items.length > 0 && <div class="highlight-group">
           <h3>{group}</h3>
-          <HighlightList items={items} onPick={setPicked} />
+          <HighlightList items={items} replay={replay} onPick={setPicked} />
         </div>;
       })}
       {picked && <Modal title={picked.label} onClose={() => setPicked(null)}>
@@ -302,19 +308,25 @@ function Highlights({ records, replayHighlights, replay }: {
               <th scope="col" class="n">#</th>
               <th scope="col">Player</th>
               <th scope="col" class="n">Value</th>
-              {picked.group === "Movement" && <th scope="col">Replay</th>}
+              {replay && hasReplayMoments(picked) && <th scope="col">Replay</th>}
             </tr></thead>
             <tbody>
               {picked.ranking.map((r, i) => <tr>
                 <td class="n">{i + 1}</td>
                 <th scope="row"><a href={playerHref(r.name)}>{r.name}</a></th>
                 <td class="n">{r.value == null ? <span class="muted">Not tracked</span> : highlightValue(r.value)}</td>
-                {picked.group === "Movement" && <td>
+                {replay && hasReplayMoments(picked) && <td>
                   {r.run && replay ? <>
                     <a href={`${replay}?t=${r.run.start / 100}&follow=${encodeURIComponent(r.name)}`}
                        target="_blank" rel="noopener">Watch run</a>
                     <span class="muted"> · {r.run.seconds}s cloaked</span>
-                  </> : <span class="muted">–</span>}
+                  </> : r.moments?.length ? <ul class="replay-moments">
+                    {r.moments.map((moment) => <li>
+                      <a href={`${replay}?t=${moment.start / 100}&follow=${encodeURIComponent(r.name)}`}
+                         target="_blank" rel="noopener">{moment.label ?? "Watch moment"}</a>
+                      <span class="muted"> · {duration(moment.start / 100)} – {duration(moment.end / 100)}</span>
+                    </li>)}
+                  </ul> : <span class="muted">–</span>}
                 </td>}
               </tr>)}
             </tbody>

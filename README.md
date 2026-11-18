@@ -39,6 +39,12 @@ The two are never added together: different arenas, different settings.
   dying and most deaths without an enemy kill. Replay peaks cover the whole
   recording, including between rounds and runs still in progress at its end.
   Minute counts include team kills; suicides count as deaths, not kills.
+  Kill/death peak rankings link to the first occurrence of each player's
+  best result, with a five-second lead-in and player-follow enabled.
+  **Most streaks ended** keeps the bot's totals and adds links to each
+  reconstructed enemy streak of 10+ ended in the recording; replay events
+  and scoreboard totals can differ. A **Replay** badge marks highlights
+  with watchable moments, including cloaked advances.
   With replay base geometry available, **Longest cloaked advance** measures
   net progress toward the enemy safe along the base's four-neighbour tile
   paths (one tile is 16 pixels), not total distance flown. Measurement starts

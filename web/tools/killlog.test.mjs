@@ -99,6 +99,20 @@ assert.deepEqual(boardHighlights.find((h) => h.label === "Most attached to").ran
 ]);
 assert.equal(boardHighlights.find((h) => h.label === "Most field time").ranking[0].value, "100m 00s");
 
+// Replay moments augment the existing bot ranking; reconstructed endings
+// must never replace its scoreboard values or exclude zero-valued players.
+const endings = [{ start: 500, end: 1000, label: "Ended Bob's 10-kill streak" }];
+const endingHighlight = highlights([
+  { player_name: "ANN", streak_ends: 4 },
+  { player_name: "Bob", streak_ends: 0 },
+], { ann: endings }).find((h) => h.label === "Most streaks ended");
+assert.equal(endingHighlight.value, "4");
+assert.equal(endingHighlight.ranking[0].value, "4");
+assert.deepEqual(endingHighlight.ranking[0].moments, endings);
+assert.equal(endingHighlight.ranking[1].moments, undefined);
+assert.equal(highlights([{ player_name: "Ann", streak_ends: 4 }])
+  .find((h) => h.label === "Most streaks ended").ranking[0].moments, undefined);
+
 // Sorting compares displayed numbers and elapsed time numerically, not
 // lexically; it preserves the board and leaves untracked cells last.
 const boardRows = [

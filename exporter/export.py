@@ -258,11 +258,14 @@ def chat_doc(doc, rounds):
 
 def _rolling_minute_peak(ticks):
     left = best = 0
+    moment = None
     for right, tick in enumerate(ticks):
         while tick - ticks[left] >= 6000:
             left += 1
-        best = max(best, right - left + 1)
-    return best
+        if right - left + 1 > best:
+            best = right - left + 1
+            moment = (ticks[left], tick)
+    return best, moment
 
 
 def _replay_peaks(kills, name):
@@ -272,45 +275,59 @@ def _replay_peaks(kills, name):
     kills_at, deaths_at, live_kills, kill_free_deaths = [], [], [], []
     kills_without_dying = deaths_without_killing = 0
     deaths = deaths_before_kill = 0
-    active = {}
-    streaks = []
+    moments = {}
+    enemy_run = []
+    longest = 0
+
+    def peak(key, ticks, best):
+        value, moment = _rolling_minute_peak(ticks)
+        if value > best:
+            moments[key] = moment
+        return max(best, value)
+
     for k in ordered:
         killer, killed = fold(k["killer"]), fold(k["killed"])
         if killer == me and killed != me:
             kills_at.append(k["t"])
             live_kills.append(k["t"])
-            deaths_without_killing = max(
-                deaths_without_killing, _rolling_minute_peak(kill_free_deaths))
+            deaths_without_killing = peak(
+                "deathsMinuteWithoutKilling", kill_free_deaths,
+                deaths_without_killing)
             kill_free_deaths = []
             if not k["teamKill"]:
                 deaths = 0
+                enemy_run.append(k["t"])
+                if len(enemy_run) > longest:
+                    longest = len(enemy_run)
+                    moments["killsBeforeDying"] = (enemy_run[0], k["t"])
         if killed == me:
             deaths_at.append(k["t"])
             kill_free_deaths.append(k["t"])
-            kills_without_dying = max(
-                kills_without_dying, _rolling_minute_peak(live_kills))
+            kills_without_dying = peak(
+                "killsMinuteWithoutDying", live_kills, kills_without_dying)
             live_kills = []
+            enemy_run = []
             deaths += 1
-            deaths_before_kill = max(deaths_before_kill, deaths)
+            if deaths == 1:
+                death_start = k["t"]
+            if deaths > deaths_before_kill:
+                deaths_before_kill = deaths
+                moments["deathsBeforeKill"] = (death_start, k["t"])
 
-        run = active.pop(killed, None)
-        if run:
-            streaks.append(run)
-        if killer != killed and not k["teamKill"]:
-            active.setdefault(killer, []).append(k)
-    streaks.extend(active.values())
-    longest = max((len(run) for run in streaks
-                   if fold(run[0]["killer"]) == me), default=0)
-    return {
-        "killsMinute": _rolling_minute_peak(kills_at),
-        "deathsMinute": _rolling_minute_peak(deaths_at),
+    kills_minute, moments["killsMinute"] = _rolling_minute_peak(kills_at)
+    deaths_minute, moments["deathsMinute"] = _rolling_minute_peak(deaths_at)
+    values = {
+        "killsMinute": kills_minute,
+        "deathsMinute": deaths_minute,
         "killsBeforeDying": longest,
         "deathsBeforeKill": deaths_before_kill,
-        "killsMinuteWithoutDying": max(
-            kills_without_dying, _rolling_minute_peak(live_kills)),
-        "deathsMinuteWithoutKilling": max(
-            deaths_without_killing, _rolling_minute_peak(kill_free_deaths)),
+        "killsMinuteWithoutDying": peak(
+            "killsMinuteWithoutDying", live_kills, kills_without_dying),
+        "deathsMinuteWithoutKilling": peak(
+            "deathsMinuteWithoutKilling", kill_free_deaths,
+            deaths_without_killing),
     }
+    return values, moments
 
 
 def replay_highlights(kills, players):
@@ -325,23 +342,56 @@ def replay_highlights(kills, players):
         ("Deaths", "Most deaths in a minute without killing",
          "deathsMinuteWithoutKilling"),
     )
-    peaks = [(p["player_name"], _replay_peaks(kills, p["player_name"]))
+    peaks = [(p["player_name"], *_replay_peaks(kills, p["player_name"]))
              for p in players]
     out = []
     for group, label, key in categories:
-        scores = [(name, values[key]) for name, values in peaks]
-        best = max((value for _name, value in scores), default=0)
+        scores = [(name, values[key], moments.get(key))
+                  for name, values, moments in peaks]
+        best = max((value for _name, value, _moment in scores), default=0)
         if best <= 0:
             continue
-        leaders = sorted((name for name, value in scores if value == best),
+        leaders = sorted((name for name, value, _moment in scores if value == best),
                          key=str.lower)
-        ranking = sorted(scores, key=lambda row: (-row[1], row[0].lower()))
+        ranking = []
+        for name, value, moment in sorted(
+                scores, key=lambda row: (-row[1], row[0].lower())):
+            row = {"name": name, "value": str(value)}
+            if moment is not None:
+                row["moments"] = [{"start": max(0, moment[0] - 500),
+                                   "end": moment[1]}]
+            ranking.append(row)
         out.append({
             "group": group, "label": label, "value": str(best),
             "names": leaders[:3], "more": max(0, len(leaders) - 3),
-            "ranking": [{"name": name, "value": str(value)}
-                        for name, value in ranking],
+            "description": (
+                "Replay-derived counts over the whole recording, including "
+                "time between rounds. Minute windows are rolling and exclude "
+                "events exactly 60 seconds apart. Team kills count in minute "
+                "peaks; enemy-kill streaks exclude them, and any death ends "
+                "a streak. Deaths before a kill reset on an enemy kill; "
+                "uninterrupted-minute death runs reset on any kill. "
+                "Watch the first occurrence of each player's best result, "
+                "starting 5 seconds before its first event."),
+            "ranking": ranking,
         })
+    return out
+
+
+def streak_end_moments(kills):
+    """Every reconstructed enemy streak of 10+ ended, with a 5s lead-in."""
+    active, out = {}, {}
+    for k in sorted(kills, key=lambda k: k["t"]):
+        killer, killed = fold(k["killer"]), fold(k["killed"])
+        count = active.pop(killed, 0)
+        if killer == killed or k["teamKill"]:
+            continue
+        if count >= 10:
+            out.setdefault(killer, []).append({
+                "start": max(0, k["t"] - 500), "end": k["t"],
+                "label": "Ended %s's %s-kill streak" % (k["killed"], count),
+            })
+        active[killer] = active.get(killer, 0) + 1
     return out
 
 
@@ -414,6 +464,7 @@ def replay_stats_doc(raw, players):
         "breakdowns": {fold(p["player_name"]): player_kill_breakdown(
             kills, p["player_name"]) for p in players},
         "highlights": replay_highlights(kills, players),
+        "streakEnds": streak_end_moments(kills),
     }
 
 

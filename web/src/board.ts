@@ -2,7 +2,7 @@
 // scoreboard_items, neobot_items, highlight_lines, _marker_key), so a board
 // here and !bdmatch in game show the same numbers. Pure: rows in, cells out.
 
-import type { NeobotLineRow, NeobotPlayerRow, PlayerRow, ReplayHighlight, RoundRow } from "./data";
+import type { NeobotLineRow, NeobotPlayerRow, PlayerRow, ReplayHighlight, ReplayMoment, RoundRow } from "./data";
 import { duration, fold, pyFixed, pySum, rating, timeShare } from "./format";
 
 // The bots' columns. Kills and deaths are K and D: players read the league
@@ -276,7 +276,7 @@ function fmtTime(secs: number): string {
 }
 
 /** highlight_lines: the leader in each category; a tie shares the line. */
-export function highlights(records: HighlightRecord[]): Highlight[] {
+export function highlights(records: HighlightRecord[], streakEnds?: Record<string, ReplayMoment[]>): Highlight[] {
   if (!records.length) return [];
   const col = (key: HighlightField) => (r: HighlightRecord) => r[key] ?? null;
   const cats: [HighlightGroup, string, (r: HighlightRecord) => number | null, (v: number) => string][] = [
@@ -300,6 +300,12 @@ export function highlights(records: HighlightRecord[]): Highlight[] {
   const out: Highlight[] = [];
   for (const [group, label, value, show] of cats) {
     const h = highlightLeaders(group, label, records, value, show, label === "Highest rated");
+    if (h && label === "Most streaks ended" && streakEnds) {
+      h.ranking = h.ranking.map((r) => ({ ...r, moments: streakEnds[fold(r.name)] }));
+      h.description = "Values are the bot's scoreboard totals. Replay links show reconstructed enemy " +
+        "streaks of 10+ ended during the whole recording and may not match those totals. " +
+        "Each link starts 5 seconds before the ending kill and follows the player who ended the streak.";
+    }
     if (h) out.push(h);
   }
   return out;
