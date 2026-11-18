@@ -165,11 +165,12 @@ CAREER_COLS = CAREER_KEYS + ("player_name", "last_team", "last_match_id",
                              "neobot_matches")
 
 
-def control_doc(match_id, doc, rounds):
+def control_doc(match_id, doc, rounds, players=()):
     """A league match's base control, from web/tools/control.mjs's file for
     its replay: per round (by seq, never round_no), freq 0's Held percent as
     the replay's dashboard shows it and its share once a second. Only rounds
-    of this match in bd_rounds; None when the match has none."""
+    of this match in bd_rounds, plus optional cloak-run highlights; None
+    when the match has no joined rounds."""
     if not doc:
         return None
     seqs = {r["seq"] for r in rounds}
@@ -183,7 +184,58 @@ def control_doc(match_id, doc, rounds):
             continue
         out.append({"seq": r["seq"], "held": r["pct"],
                     "shares": r["shares"]})
-    return {"rounds": out} if out else None
+    result = {"rounds": out} if out else None
+    if result is not None:
+        highlight = cloak_highlight(doc, seqs, players)
+        if highlight:
+            result["highlights"] = [highlight]
+    return result
+
+
+def cloak_highlight(doc, seqs, players):
+    """Replay-only corridor progress; only rounds joined to this match."""
+    tracked = {fold(name) for name in doc.get("cloakPlayers", ())}
+    best = {}
+    for run in doc.get("cloak", ()):
+        if run["seq"] not in seqs:
+            continue
+        name = fold(run["name"])
+        if name not in best or run["tiles"] > best[name]["tiles"]:
+            best[name] = run
+    scores = []
+    for p in players:
+        name = p["player_name"]
+        run = best.get(fold(name))
+        value = run["tiles"] if run else 0 if fold(name) in tracked else None
+        scores.append((name, value, run))
+    scores.sort(key=lambda row: (row[1] is None, -(row[1] or 0), fold(row[0])))
+    peak = max((value or 0 for _name, value, _run in scores), default=0)
+    if peak <= 0:
+        return None
+    leaders = sorted((name for name, value, _run in scores if value == peak),
+                     key=fold)
+    ranking = []
+    for name, value, run in scores:
+        row = {"name": name, "value": "%s tiles" % value
+               if value is not None else None}
+        if run:
+            row["run"] = {key: run[key] for key in ("start", "end", "seconds")}
+        ranking.append(row)
+    return {
+        "group": "Movement", "label": "Longest cloaked advance",
+        "value": "%s tiles" % peak,
+        "names": leaders[:3], "more": max(0, len(leaders) - 3),
+        "ranking": ranking,
+        "description": (
+            "Net progress toward the enemy safe through the base corridors, "
+            "in map tiles (16 pixels), starting 10 seconds after each round "
+            "begins. Earlier movement and cloaked time do not count. "
+            "Visible forward movement does not count; "
+            "backtracking undoes progress. Shooting reveals of up to 2 seconds "
+            "can join a run. Death, ship/team changes, warps/attaches, leaving "
+            "the base, missing position data and round boundaries reset it. "
+            "A packet-derived estimate, not a bot stat."),
+    }
 
 
 def chat_doc(doc, rounds):
@@ -440,7 +492,8 @@ class Section:
                     self.replay[m["id"]] = "%s/r/%s" % (
                         replay_site.rstrip("/"), replay_id)
                     got = control_doc(m["id"], (control or {}).get(rid.lower()),
-                                      self.rounds_by_match.get(m["id"], []))
+                                      self.rounds_by_match.get(m["id"], []),
+                                      self.players_by_match.get(m["id"], []))
                     if got:
                         self.control[m["id"]] = got
                     said = chat_doc((chat or {}).get(rid.lower()),

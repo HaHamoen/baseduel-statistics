@@ -2,7 +2,7 @@
 // scoreboard_items, neobot_items, highlight_lines, _marker_key), so a board
 // here and !bdmatch in game show the same numbers. Pure: rows in, cells out.
 
-import type { NeobotLineRow, NeobotPlayerRow, PlayerRow, RoundRow } from "./data";
+import type { NeobotLineRow, NeobotPlayerRow, PlayerRow, ReplayHighlight, RoundRow } from "./data";
 import { duration, fold, pyFixed, pySum, rating, timeShare } from "./format";
 
 // The bots' columns. Kills and deaths are K and D: players read the league
@@ -233,16 +233,11 @@ export function neobotBoard(lines: NeobotLineRow[], players: NeobotPlayerRow[],
   });
 }
 
-export const HIGHLIGHT_GROUPS = ["Score & time", "Kills", "Deaths", "Damage", "Teamwork", "Items"] as const;
+export const HIGHLIGHT_GROUPS = ["Score & time", "Kills", "Deaths", "Damage", "Teamwork", "Items", "Movement"] as const;
 export type HighlightGroup = typeof HIGHLIGHT_GROUPS[number];
 
-export interface Highlight {
+export interface Highlight extends Omit<ReplayHighlight, "group"> {
   group: HighlightGroup;
-  label: string;
-  names: string[];
-  more: number;
-  value: string;
-  ranking: { name: string; value: string | null }[];
 }
 
 const HIGHLIGHT_MAX_NAMES = 3;

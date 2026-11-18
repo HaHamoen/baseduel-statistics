@@ -273,12 +273,13 @@ export interface ReplayPlayer {
   shots: Record<string, number>;
 }
 export interface ReplayHighlight {
-  group: "Kills" | "Deaths";
+  group: "Kills" | "Deaths" | "Movement";
   label: string;
   value: string;
   names: string[];
   more: number;
-  ranking: { name: string; value: string | null }[];
+  description?: string;
+  ranking: { name: string; value: string | null; run?: { start: number; end: number; seconds: number } }[];
 }
 /** Replay stats embedded by the exporter; the page never fetches ss-replay. */
 export interface ReplayStats {
@@ -311,7 +312,7 @@ export interface MatchDoc {
   rounds: Table;
   round_players: Table;
   /** League matches with a replay only. */
-  control?: { rounds: ControlRound[] };
+  control?: { rounds: ControlRound[]; highlights?: ReplayHighlight[] };
   /** League matches whose replay holds any chat. */
   chat?: ChatDoc;
   /** Published league replay stats, read and prepared by the exporter. */

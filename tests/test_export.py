@@ -311,6 +311,49 @@ class TestMatches(ExportCase):
         # the match page only: the lists and leaderboards' facts stay small
         self.assertNotIn('"shares"', json.dumps(self.load("facts/league.json")))
 
+    def test_cloak_highlight_uses_published_matched_rounds_and_roster(self):
+        recs = ("bd202611011900", "bd202611012000", "bd202611012100")
+        a, b, c = (self.league.match(mode="match", arena="bdl", recording=r)
+                   for r in recs)
+        for mid in (a, b, c):
+            for name in ("Ann", "Bob", "Carl", "Dan"):
+                self.league.player(mid, name, 0, True)
+            self.league.round(mid, 1, 0)
+        replay_control = {
+            "rounds": [{"seq": 1, "pct": 50, "shares": [0.5]}],
+            "cloakPlayers": ["ANN", "bob", "Carl", "Spectator"],
+            "cloak": [
+                {"seq": 1, "name": "ann", "tiles": 20, "start": 100,
+                 "end": 500, "seconds": 3.5},
+                {"seq": 1, "name": "Bob", "tiles": 20, "start": 200,
+                 "end": 600, "seconds": 4},
+                {"seq": 9, "name": "Ann", "tiles": 1000, "start": 700,
+                 "end": 900, "seconds": 2},
+                {"seq": 1, "name": "Spectator", "tiles": 2000, "start": 100,
+                 "end": 800, "seconds": 7},
+            ],
+        }
+        self.run_export(
+            replays={"bdl-" + r: "bdl-" + r for r in recs[:2]},
+            control={"bdl-" + recs[0]: replay_control,
+                     "bdl-" + recs[2]: replay_control})
+        shard = self.load("m/league/0.json")
+        highlight, = shard[str(a)]["control"]["highlights"]
+        self.assertEqual((highlight["group"], highlight["value"],
+                          highlight["names"]), ("Movement", "20 tiles",
+                                                ["Ann", "Bob"]))
+        self.assertEqual(highlight["ranking"], [
+            {"name": "Ann", "value": "20 tiles",
+             "run": {"start": 100, "end": 500, "seconds": 3.5}},
+            {"name": "Bob", "value": "20 tiles",
+             "run": {"start": 200, "end": 600, "seconds": 4}},
+            {"name": "Carl", "value": "0 tiles"},
+            {"name": "Dan", "value": None},
+        ])
+        for mid in (b, c):
+            self.assertNotIn("control", shard[str(mid)])
+        self.assertNotIn("cloak", json.dumps(self.load("facts/league.json")))
+
     def test_chat_only_from_a_published_replay_with_its_rounds(self):
         recs = ("bd202611011900", "bd202611012000", "bd202611012100",
                 "bd202611012200")

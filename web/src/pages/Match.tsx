@@ -113,7 +113,9 @@ function OwnMatch({ section, doc }: { section: Section; doc: MatchDoc }) {
                           row={players.find((p) => fold(p.player_name) === fold(stat.name))}
                           onClose={() => setStat(null)} />
       )}
-      {players.length > 0 && <Highlights records={players} replayHighlights={doc.stats?.highlights} />}
+      {players.length > 0 && <Highlights records={players}
+        replayHighlights={[...(doc.stats?.highlights ?? []), ...(doc.control?.highlights ?? [])]}
+        replay={m.replay} />}
       <Rounds rounds={rounds} names={names} fa={fa} roundPlayers={roundPlayers} control={doc.control?.rounds} />
       {doc.chat && <Chat chat={doc.chat} rounds={rounds} names={names} fa={fa} replay={m.replay} />}
     </>
@@ -274,8 +276,8 @@ function HighlightList({ items, onPick }: { items: Highlight[]; onPick: (h: High
   );
 }
 
-function Highlights({ records, replayHighlights }: {
-  records: HighlightRecord[]; replayHighlights?: Highlight[];
+function Highlights({ records, replayHighlights, replay }: {
+  records: HighlightRecord[]; replayHighlights?: Highlight[]; replay?: string | null;
 }) {
   const [picked, setPicked] = useState<Highlight | null>(null);
   const hs = highlights(records);
@@ -292,6 +294,7 @@ function Highlights({ records, replayHighlights }: {
         </div>;
       })}
       {picked && <Modal title={picked.label} onClose={() => setPicked(null)}>
+        {picked.description && <p class="chart-note">{picked.description}</p>}
         <p class="chart-note">All players in this match, highest to lowest.</p>
         <div class="scroll">
           <table class="data">
@@ -299,12 +302,20 @@ function Highlights({ records, replayHighlights }: {
               <th scope="col" class="n">#</th>
               <th scope="col">Player</th>
               <th scope="col" class="n">Value</th>
+              {picked.group === "Movement" && <th scope="col">Replay</th>}
             </tr></thead>
             <tbody>
               {picked.ranking.map((r, i) => <tr>
                 <td class="n">{i + 1}</td>
                 <th scope="row"><a href={playerHref(r.name)}>{r.name}</a></th>
                 <td class="n">{r.value == null ? <span class="muted">Not tracked</span> : highlightValue(r.value)}</td>
+                {picked.group === "Movement" && <td>
+                  {r.run && replay ? <>
+                    <a href={`${replay}?t=${r.run.start / 100}&follow=${encodeURIComponent(r.name)}`}
+                       target="_blank" rel="noopener">Watch run</a>
+                    <span class="muted"> · {r.run.seconds}s cloaked</span>
+                  </> : <span class="muted">–</span>}
+                </td>}
               </tr>)}
             </tbody>
           </table>

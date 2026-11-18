@@ -39,9 +39,20 @@ The two are never added together: different arenas, different settings.
   dying and most deaths without an enemy kill. Replay peaks cover the whole
   recording, including between rounds and runs still in progress at its end.
   Minute counts include team kills; suicides count as deaths, not kills.
+  With replay base geometry available, **Longest cloaked advance** measures
+  net progress toward the enemy safe along the base's four-neighbour tile
+  paths (one tile is 16 pixels), not total distance flown. Measurement starts
+  10 seconds after each round begins, with no distance or cloaked time carried
+  over from those first 10 seconds. Shooting reveals
+  of up to two seconds join the same run; visible forward movement earns no
+  distance and backtracking undoes progress. Death, ship/team changes,
+  position discontinuities (warps/attaches), leaving the base, gaps in
+  position data and round boundaries reset the run. Only matched rounds
+  count. This is a packet-derived estimate, not a bot stat; the ranking links
+  to each player's best run and shows its observed cloaked time.
   Each highlight opens a complete highest-to-lowest ranking for the match;
   player names still link to career pages, and untracked values stay untracked.
-  Highlights are grouped by score/time, kills, deaths, damage, teamwork and
+  Highlights are grouped by score/time, kills, deaths, damage, teamwork, movement and
   items, with an arrow marking each clickable card. Uninterrupted-minute
   highlights count kills before any death and deaths before any kill within
   rolling windows of up to 60 seconds; shorter runs qualify and team kills
