@@ -258,6 +258,53 @@ export interface ChatDoc {
   lines: ChatLine[];
 }
 
+export interface ReplayKill {
+  t: number;
+  killer: string;
+  killed: string;
+  weapon: string;
+  teamKill: boolean;
+  killerFreq: number;
+  killedFreq: number;
+}
+export interface ReplayPlayer {
+  player: number;
+  name: string;
+  shots: Record<string, number>;
+}
+export interface ReplayHighlight {
+  group: "Kills" | "Deaths";
+  label: string;
+  value: string;
+  names: string[];
+  more: number;
+  ranking: { name: string; value: string | null }[];
+}
+/** Replay stats embedded by the exporter; the page never fetches ss-replay. */
+export interface ReplayStats {
+  end: number;
+  players: ReplayPlayer[];
+  kills: ReplayKill[];
+  breakdowns: Record<string, PlayerKillBreakdown>;
+  highlights: ReplayHighlight[];
+}
+export interface PlayerKillBreakdown {
+  killed: Versus[];
+  killedBy: Versus[];
+  teamKilled: Versus[];
+  teamKilledBy: Versus[];
+  kills: number;
+  deaths: number;
+  weaponsOut: Record<string, number>;
+  weaponsIn: Record<string, number>;
+}
+export interface Versus {
+  name: string;
+  freq: number;
+  n: number;
+  weapons: Record<string, number>;
+}
+
 export interface MatchDoc {
   match: MatchRow;
   players: Table;
@@ -267,6 +314,8 @@ export interface MatchDoc {
   control?: { rounds: ControlRound[] };
   /** League matches whose replay holds any chat. */
   chat?: ChatDoc;
+  /** Published league replay stats, read and prepared by the exporter. */
+  stats?: ReplayStats;
 }
 
 export interface NeobotMatchRow {

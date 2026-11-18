@@ -349,6 +349,88 @@ class TestMatches(ExportCase):
         # the match page only
         self.assertNotIn("no sender", json.dumps(self.load("facts/league.json")))
 
+    def test_stats_are_embedded_only_for_published_replays(self):
+        recs = ("bd202611151432", "bd202611151500", "bd202611151530")
+        a, b, c = (self.league.match(mode="match", arena="bdl", recording=r)
+                   for r in recs)
+        for mid in (a, b, c):
+            self.league.player(mid, "Ann", 0, True)
+            self.league.player(mid, "Bob", 1, False)
+            self.league.player(mid, "Cy", 1, False)
+        stats_dir = os.path.join(self.tmp, "replays")
+        os.makedirs(stats_dir)
+        raw = {
+            "source": {"endTick": 10000},
+            "players": [
+                {"player": 1, "name": "ann", "shots": {"burst": 2}},
+                {"player": 2, "name": "Bob", "shots": {"repel": 3}},
+                {"player": 3, "name": "Cy", "shots": {}},
+            ],
+            "killLog": [
+                {"t": 100, "killer": 1, "killed": 2, "weapon": "bullet",
+                 "teamKill": False, "killerFreq": 0, "killedFreq": 1},
+                {"t": 200, "killer": 1, "killed": 2, "weapon": "burst",
+                 "teamKill": False, "killerFreq": 0, "killedFreq": 1},
+                {"t": 300, "killer": 2, "killed": 1, "weapon": None,
+                 "teamKill": False, "killerFreq": 1, "killedFreq": 0},
+                {"t": 400, "killer": 3, "killed": 1, "weapon": "bomb",
+                 "teamKill": True, "killerFreq": 1, "killedFreq": 0},
+            ],
+        }
+        with open(os.path.join(stats_dir, "bdl-%s.stats.json" % recs[0]), "w") as f:
+            json.dump(raw, f)
+        # A stats file for an unpublished replay must not become site data.
+        with open(os.path.join(stats_dir, "bdl-%s.stats.json" % recs[2]), "w") as f:
+            json.dump(raw, f)
+
+        got = self.run_export(
+            replays={"bdl-" + r: "bdl-" + r for r in recs[:2]},
+            stats_dir=stats_dir)
+        shard = self.load("m/league/0.json")
+        stats = shard[str(a)]["stats"]
+        self.assertEqual(stats["end"], 10000)
+        self.assertEqual(stats["players"][0],
+                         {"player": 1, "name": "ann", "shots": {"burst": 2}})
+        self.assertEqual(stats["kills"][0], {
+            "t": 100, "killer": "ann", "killed": "Bob", "weapon": "bullet",
+            "teamKill": False, "killerFreq": 0, "killedFreq": 1})
+        self.assertEqual(stats["kills"][2]["weapon"], "unknown")
+        self.assertEqual((stats["breakdowns"]["ann"]["kills"],
+                          stats["breakdowns"]["ann"]["deaths"]), (2, 1))
+        self.assertEqual(stats["breakdowns"]["ann"]["killed"], [{
+            "name": "Bob", "freq": 1, "n": 2,
+            "weapons": {"bullet": 1, "burst": 1}}])
+        self.assertEqual(stats["breakdowns"]["ann"]["teamKilledBy"][0]["name"],
+                         "Cy")
+        self.assertEqual(
+            [(h["label"], h["value"], h["names"]) for h in stats["highlights"]],
+            [("Most kills in a minute", "2", ["Ann"]),
+             ("Most enemy kills before dying", "2", ["Ann"]),
+             ("Most deaths in a minute", "2", ["Ann", "Bob"]),
+             ("Most deaths before a kill", "2", ["Ann", "Bob"]),
+             ("Most kills in a minute without dying", "2", ["Ann"]),
+             ("Most deaths in a minute without killing", "2", ["Ann", "Bob"])])
+        self.assertNotIn("stats", shard[str(b)])
+        self.assertNotIn("stats", shard[str(c)])
+        self.assertEqual(got["stats_matches"], 1)
+
+    def test_replay_highlights_use_half_open_rolling_minute_windows(self):
+        kills = [
+            {"t": 5900, "killer": "Ann", "killed": "Bob"},
+            {"t": 6100, "killer": "Ann", "killed": "Cy"},
+            {"t": 11899, "killer": "Ann", "killed": "Dee"},
+            {"t": 11900, "killer": "Ann", "killed": "Eve"},
+        ]
+        for kill in kills:
+            kill["teamKill"] = False
+        highlights = ex.replay_highlights(kills, [{"player_name": "Ann"}])
+        values = {h["label"]: h["value"] for h in highlights}
+        # At 11900, the 5900 event is exactly 60 seconds old and is outside
+        # the half-open window; the other three still qualify together.
+        self.assertEqual(values["Most kills in a minute"], "3")
+        self.assertEqual(values["Most kills in a minute without dying"], "3")
+        self.assertEqual(values["Most enemy kills before dying"], "4")
+
     def test_play_time_leaves_out_holds_and_gaps(self):
         m = self.pub.match(length=1000.0, held_seconds=100.0,
                            dead_seconds=50.0)

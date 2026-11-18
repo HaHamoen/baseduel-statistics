@@ -24,7 +24,9 @@ The two are never added together: different arenas, different settings.
   or rating over time), teammates and rivals, and every match played.
 - **Matches:** the full scoreboard the bot prints in game, the score after
   each round, a round timeline, and for league matches with a published
-  replay, a base-control chart and the match's chat, linked to the replay.
+  replay, a base-control chart, the match's chat and replay-derived player
+  breakdowns and highlights, linked to the replay. Replay stats are embedded
+  by the exporter; the page does not fetch files from ss-replay.
   Player names open career pages; supported scoreboard stat cells open focused
   replay breakdowns: kills, deaths, team kills, reconstructed streaks, kills by
   recording minute, and repel/burst use (with estimated burst victims).
@@ -103,7 +105,8 @@ mkdir -p .snap
 python3 -m exporter snapshot /path/to/pubduel.db .snap/pubduel.db
 python3 -m exporter snapshot /path/to/baseduel.db .snap/baseduel.db
 python3 -m exporter export --pub .snap/pubduel.db --league .snap/baseduel.db \
-    --out web/public/data
+    --out web/public/data [--replays /path/to/ss-replay/web/public/data/index.json \
+    --stats /path/to/ss-replay/web/public/data]
 cd web && npm ci && npm run dev
 ```
 

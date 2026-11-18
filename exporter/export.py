@@ -204,6 +204,167 @@ def chat_doc(doc, rounds):
             "lines": doc["lines"]}
 
 
+def _rolling_minute_peak(ticks):
+    left = best = 0
+    for right, tick in enumerate(ticks):
+        while tick - ticks[left] >= 6000:
+            left += 1
+        best = max(best, right - left + 1)
+    return best
+
+
+def _replay_peaks(kills, name):
+    """The match page's replay highlights, from one player's kill events."""
+    me = fold(name)
+    ordered = sorted(kills, key=lambda k: k["t"])
+    kills_at, deaths_at, live_kills, kill_free_deaths = [], [], [], []
+    kills_without_dying = deaths_without_killing = 0
+    deaths = deaths_before_kill = 0
+    active = {}
+    streaks = []
+    for k in ordered:
+        killer, killed = fold(k["killer"]), fold(k["killed"])
+        if killer == me and killed != me:
+            kills_at.append(k["t"])
+            live_kills.append(k["t"])
+            deaths_without_killing = max(
+                deaths_without_killing, _rolling_minute_peak(kill_free_deaths))
+            kill_free_deaths = []
+            if not k["teamKill"]:
+                deaths = 0
+        if killed == me:
+            deaths_at.append(k["t"])
+            kill_free_deaths.append(k["t"])
+            kills_without_dying = max(
+                kills_without_dying, _rolling_minute_peak(live_kills))
+            live_kills = []
+            deaths += 1
+            deaths_before_kill = max(deaths_before_kill, deaths)
+
+        run = active.pop(killed, None)
+        if run:
+            streaks.append(run)
+        if killer != killed and not k["teamKill"]:
+            active.setdefault(killer, []).append(k)
+    streaks.extend(active.values())
+    longest = max((len(run) for run in streaks
+                   if fold(run[0]["killer"]) == me), default=0)
+    return {
+        "killsMinute": _rolling_minute_peak(kills_at),
+        "deathsMinute": _rolling_minute_peak(deaths_at),
+        "killsBeforeDying": longest,
+        "deathsBeforeKill": deaths_before_kill,
+        "killsMinuteWithoutDying": max(
+            kills_without_dying, _rolling_minute_peak(live_kills)),
+        "deathsMinuteWithoutKilling": max(
+            deaths_without_killing, _rolling_minute_peak(kill_free_deaths)),
+    }
+
+
+def replay_highlights(kills, players):
+    """The same replay-only highlight rows the match page used to derive."""
+    categories = (
+        ("Kills", "Most kills in a minute", "killsMinute"),
+        ("Kills", "Most enemy kills before dying", "killsBeforeDying"),
+        ("Deaths", "Most deaths in a minute", "deathsMinute"),
+        ("Deaths", "Most deaths before a kill", "deathsBeforeKill"),
+        ("Kills", "Most kills in a minute without dying",
+         "killsMinuteWithoutDying"),
+        ("Deaths", "Most deaths in a minute without killing",
+         "deathsMinuteWithoutKilling"),
+    )
+    peaks = [(p["player_name"], _replay_peaks(kills, p["player_name"]))
+             for p in players]
+    out = []
+    for group, label, key in categories:
+        scores = [(name, values[key]) for name, values in peaks]
+        best = max((value for _name, value in scores), default=0)
+        if best <= 0:
+            continue
+        leaders = sorted((name for name, value in scores if value == best),
+                         key=str.lower)
+        ranking = sorted(scores, key=lambda row: (-row[1], row[0].lower()))
+        out.append({
+            "group": group, "label": label, "value": str(best),
+            "names": leaders[:3], "more": max(0, len(leaders) - 3),
+            "ranking": [{"name": name, "value": str(value)}
+                        for name, value in ranking],
+        })
+    return out
+
+
+def player_kill_breakdown(kills, name):
+    """One player's whole-recording kills by enemy, teammate and weapon."""
+    me = fold(name)
+    buckets = {key: {} for key in ("killed", "killedBy", "teamKilled",
+                                    "teamKilledBy")}
+    out = {"killed": [], "killedBy": [], "teamKilled": [],
+           "teamKilledBy": [], "kills": 0, "deaths": 0,
+           "weaponsOut": {}, "weaponsIn": {}}
+
+    def add(bucket, other, freq, weapon):
+        key = fold(other)
+        item = bucket.get(key)
+        if item is None:
+            item = {"name": other, "freq": freq, "n": 0, "weapons": {}}
+            bucket[key] = item
+        item["n"] += 1
+        item["weapons"][weapon] = item["weapons"].get(weapon, 0) + 1
+
+    for k in kills:
+        gave = fold(k["killer"]) == me
+        took = fold(k["killed"]) == me
+        if gave == took:
+            continue
+        if gave:
+            if k["teamKill"]:
+                add(buckets["teamKilled"], k["killed"], k["killedFreq"],
+                    k["weapon"])
+            else:
+                out["kills"] += 1
+                out["weaponsOut"][k["weapon"]] = \
+                    out["weaponsOut"].get(k["weapon"], 0) + 1
+                add(buckets["killed"], k["killed"], k["killedFreq"],
+                    k["weapon"])
+        elif k["teamKill"]:
+            add(buckets["teamKilledBy"], k["killer"], k["killerFreq"],
+                k["weapon"])
+        else:
+            out["deaths"] += 1
+            out["weaponsIn"][k["weapon"]] = \
+                out["weaponsIn"].get(k["weapon"], 0) + 1
+            add(buckets["killedBy"], k["killer"], k["killerFreq"],
+                k["weapon"])
+
+    for key, bucket in buckets.items():
+        out[key] = sorted(bucket.values(),
+                          key=lambda item: (-item["n"], item["name"].lower()))
+    return out
+
+
+def replay_stats_doc(raw, players):
+    """The useful, compact portion of ss-replay's stats for a match page."""
+    names = {p["player"]: p["name"] for p in raw["players"]}
+    kills = [{
+        "t": k["t"],
+        "killer": names.get(k["killer"], "?"),
+        "killed": names.get(k["killed"], "?"),
+        "weapon": k.get("weapon") or "unknown",
+        "teamKill": k["teamKill"],
+        "killerFreq": k["killerFreq"],
+        "killedFreq": k["killedFreq"],
+    } for k in raw["killLog"]]
+    return {
+        "end": raw["source"]["endTick"],
+        "players": [{"player": p["player"], "name": p["name"],
+                     "shots": p.get("shots", {})} for p in raw["players"]],
+        "kills": kills,
+        "breakdowns": {fold(p["player_name"]): player_kill_breakdown(
+            kills, p["player_name"]) for p in players},
+        "highlights": replay_highlights(kills, players),
+    }
+
+
 def career(c):
     """A career as the site stores it: None for none, else every key, with
     None for anything not tracked."""
@@ -216,7 +377,8 @@ class Section:
     """One bot's database, read once."""
 
     def __init__(self, name, conn, scopes, is_bot, replays=None,
-                 replay_site=None, unfinished=True, control=None, chat=None):
+                 replay_site=None, unfinished=True, control=None, chat=None,
+                 stats_dir=None):
         self.name = name
         self.scopes = scopes
         self.is_bot = is_bot
@@ -267,13 +429,16 @@ class Section:
         self.replay = {}
         self.control = {}
         self.chat = {}
+        self.stats_dir = stats_dir
+        self.stats_replay_id = {}
         if replays is not None:
             for m in self.matches:
                 rid = ("%s-%s" % (m.get("arena"), m.get("recording"))
                        if m.get("recording") else None)
                 if rid and rid.lower() in replays:
+                    replay_id = replays[rid.lower()]
                     self.replay[m["id"]] = "%s/r/%s" % (
-                        replay_site.rstrip("/"), replays[rid.lower()])
+                        replay_site.rstrip("/"), replay_id)
                     got = control_doc(m["id"], (control or {}).get(rid.lower()),
                                       self.rounds_by_match.get(m["id"], []))
                     if got:
@@ -282,6 +447,10 @@ class Section:
                                     self.rounds_by_match.get(m["id"], []))
                     if said:
                         self.chat[m["id"]] = said
+                    if stats_dir:
+                        path = os.path.join(stats_dir, replay_id + ".stats.json")
+                        if os.path.isfile(path):
+                            self.stats_replay_id[m["id"]] = replay_id
 
     def counts(self, m):
         """Whether a match is in histories, counts and bases."""
@@ -337,6 +506,12 @@ class Section:
             out["control"] = self.control[mid]
         if mid in self.chat:
             out["chat"] = self.chat[mid]
+        if mid in self.stats_replay_id:
+            path = os.path.join(
+                self.stats_dir, self.stats_replay_id[mid] + ".stats.json")
+            with open(path, encoding="utf-8") as f:
+                out["stats"] = replay_stats_doc(
+                    json.load(f), self.players_by_match.get(mid, []))
         return out
 
     def facts(self, keys):
@@ -411,7 +586,7 @@ def neobot_history(games, rows):
 
 def export(pub_conn, league_conn, out, league_exclude=(), replays=None,
            replay_site="https://ss-replay.pages.dev", now=None, control=None,
-           chat=None):
+           chat=None, stats_dir=None):
     """Write the whole site's data under `out`. Returns a summary dict."""
     started = time.monotonic()
     pub_bots = readers.bot_names(pub_conn)
@@ -419,7 +594,8 @@ def export(pub_conn, league_conn, out, league_exclude=(), replays=None,
     league = Section("league", league_conn, LEAGUE_SCOPES,
                      lambda l: any(glob_match(p, l) for p in league_exclude),
                      replays=replays, replay_site=replay_site,
-                     unfinished=False, control=control, chat=chat)
+                     unfinished=False, control=control, chat=chat,
+                     stats_dir=stats_dir)
     w = Writer(out)
 
     # ---- who is who ---------------------------------------------------------
@@ -503,12 +679,16 @@ def export(pub_conn, league_conn, out, league_exclude=(), replays=None,
 
     # ---- the matches ---------------------------------------------------------
     for section in (pub, league):
-        buckets = {}
+        bucket, docs = None, {}
         for m in section.matches:
-            buckets.setdefault(m["id"] // OWN_BUCKET, {})[str(m["id"])] = \
-                section.match_doc(m)
-        for b, docs in buckets.items():
-            w.json("m/%s/%d.json" % (section.name, b), docs)
+            current = m["id"] // OWN_BUCKET
+            if bucket is not None and current != bucket:
+                w.json("m/%s/%d.json" % (section.name, bucket), docs)
+                docs = {}
+            bucket = current
+            docs[str(m["id"])] = section.match_doc(m)
+        if docs:
+            w.json("m/%s/%d.json" % (section.name, bucket), docs)
         w.json("facts/%s.json" % section.name, section.facts(keys))
         w.json("records/%s.json" % section.name,
                records.section_records(section, keys))
@@ -608,4 +788,5 @@ def export(pub_conn, league_conn, out, league_exclude=(), replays=None,
             "neobot_games": len(pub.neobot_matches),
             "replay_links": len(league.replay),
             "control_matches": len(league.control),
-            "chat_matches": len(league.chat)}
+            "chat_matches": len(league.chat),
+            "stats_matches": len(league.stats_replay_id)}

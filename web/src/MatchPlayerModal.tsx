@@ -1,10 +1,10 @@
 import { useState } from "preact/hooks";
 import { COL_HELP, type Cell } from "./board";
-import type { ChatRound, PlayerRow } from "./data";
+import type { ChatRound, PlayerRow, ReplayStats, Versus } from "./data";
 import { duration, fold, num } from "./format";
-import { loadReplayStats, minuteKills, playerKills, playerStreaks, type ReplayStats, type Versus } from "./killlog";
+import { minuteKills, playerKills, playerStreaks } from "./killlog";
 import { playerHref } from "./router";
-import { Modal, Pills, Team, useLoad } from "./ui";
+import { Modal, Pills, Team } from "./ui";
 
 const TITLES: Record<string, string> = {
   K: "Kills", D: "Deaths", TK: "Team kills", KS: "Longest kill streak",
@@ -21,13 +21,14 @@ const UNAVAILABLE: Record<string, string> = {
 };
 
 function VersusList({ title, list, fa }: { title: string; list: Versus[]; fa: number }) {
-  const max = list.reduce((m, v) => Math.max(m, v.n), 0);
+  const sorted = [...list].sort((a, b) => b.n - a.n || a.name.localeCompare(b.name));
+  const max = sorted.reduce((m, v) => Math.max(m, v.n), 0);
   return (
     <section class="vs-col">
       <h3>{title} <span class="muted">{num(list.reduce((s, v) => s + v.n, 0))}</span></h3>
       {list.length === 0 ? <p class="muted">Nobody recorded.</p> : (
         <ol class="vs-list">
-          {list.map((v) => (
+          {sorted.map((v) => (
             <li title={Object.entries(v.weapons).map(([w, n]) => `${w} ${n}`).join(", ")}>
               <Team side={v.freq === fa ? "a" : "b"}>
                 <a class="vs-name" href={playerHref(v.name)}>{v.name}</a>
@@ -45,7 +46,8 @@ function VersusList({ title, list, fa }: { title: string; list: Versus[]; fa: nu
 function ReplayDetail({ stats, name, column, window, fa }: {
   stats: ReplayStats; name: string; column: string; window?: [number, number]; fa: number;
 }) {
-  const mine = playerKills(stats.kills, name, window);
+  const mine = window ? playerKills(stats.kills, name, window)
+    : stats.breakdowns[fold(name)] ?? playerKills(stats.kills, name);
   if (column === "K" || column === "D" || column === "TK") return (
     <>
       {column === "K" && <VersusList title="Killed" list={mine.killed} fa={fa} />}
@@ -130,17 +132,15 @@ function ReplayDetail({ stats, name, column, window, fa }: {
 
 const roundLabel = (r: ChatRound) => `R${r.round}${r.attempt > 1 ? `.${r.attempt}` : ""}`;
 
-export function MatchPlayerModal({ name, column, value, replay, rounds, fa, row, onClose }: {
-  name: string; column: string; value: Cell; replay: string; rounds?: ChatRound[]; fa: number; row?: PlayerRow;
+export function MatchPlayerModal({ name, column, value, stats, rounds, fa, row, onClose }: {
+  name: string; column: string; value: Cell; stats: ReplayStats; rounds?: ChatRound[]; fa: number; row?: PlayerRow;
   onClose: () => void;
 }) {
   const [round, setRound] = useState("all");
   const unavailable = UNAVAILABLE[column];
-  const [stats, error, loading] = useLoad<ReplayStats | null>(
-    () => unavailable ? Promise.resolve(null) : loadReplayStats(replay), [replay, unavailable]);
 
   const picked = round === "all" ? undefined : rounds?.[Number(round)];
-  const window: [number, number] | undefined = picked ? [picked.start, picked.end ?? stats?.end ?? picked.start] : undefined;
+  const window: [number, number] | undefined = picked ? [picked.start, picked.end ?? stats.end] : undefined;
   const label = row?.player_name ?? name;
   const byRound = !unavailable && column !== "Rep" && column !== "Brst";
 
@@ -158,9 +158,7 @@ export function MatchPlayerModal({ name, column, value, replay, rounds, fa, row,
                      options={[["all", "Whole recording"], ...rounds.map((r, i): [string, string] => [String(i), roundLabel(r)])]} />
             </div>
           )}
-          {loading && <p class="muted">Loading replay stats…</p>}
-          {error && <p class="warn">{error.message}. The career page still works.</p>}
-          {stats && <ReplayDetail stats={stats} name={name} column={column} window={window} fa={fa} />}
+          <ReplayDetail stats={stats} name={name} column={column} window={window} fa={fa} />
           <p class="chart-note">Replay-derived details, not a replacement for the bot's scoreboard.
             The whole recording includes time between rounds; totals can differ. Kills and deaths include
             team kills, listed separately.</p>

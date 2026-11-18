@@ -13,7 +13,6 @@ import { chatCounts, chatTimeline } from "../chat";
 import { dateTime, duration, fold, num } from "../format";
 import { freqsOf, kindLabel, modeLine, outcomeWord, teamNames } from "../matchinfo";
 import { MatchPlayerModal } from "../MatchPlayerModal";
-import { loadReplayStats, replayHighlights } from "../killlog";
 import { playerHref } from "../router";
 import { Loading, Modal, Pills, Problem, Team, useLoad, useTitle } from "../ui";
 
@@ -104,17 +103,17 @@ function OwnMatch({ section, doc }: { section: Section; doc: MatchDoc }) {
       {players.length > 0 && (
         <section class="card">
           <Board heading="Scoreboard" cols={SB_COLS} colGroups={SB_GROUPS} groups={groups}
-                 onStat={m.replay ? (name, column, value) => setStat({ name, column, value }) : undefined} />
+                 onStat={doc.stats ? (name, column, value) => setStat({ name, column, value }) : undefined} />
           <BoardNotes keyLine={markerKey(players, m.winner_freq)} />
         </section>
       )}
-      {stat && m.replay && (
+      {stat && doc.stats && (
         <MatchPlayerModal key={`${stat.name}:${stat.column}`} name={stat.name} column={stat.column} value={stat.value}
-                          replay={m.replay} rounds={doc.chat?.rounds} fa={fa}
+                          stats={doc.stats} rounds={doc.chat?.rounds} fa={fa}
                           row={players.find((p) => fold(p.player_name) === fold(stat.name))}
                           onClose={() => setStat(null)} />
       )}
-      {players.length > 0 && <Highlights records={players} replay={m.replay} />}
+      {players.length > 0 && <Highlights records={players} replayHighlights={doc.stats?.highlights} />}
       <Rounds rounds={rounds} names={names} fa={fa} roundPlayers={roundPlayers} control={doc.control?.rounds} />
       {doc.chat && <Chat chat={doc.chat} rounds={rounds} names={names} fa={fa} replay={m.replay} />}
     </>
@@ -275,13 +274,12 @@ function HighlightList({ items, onPick }: { items: Highlight[]; onPick: (h: High
   );
 }
 
-function Highlights({ records, replay }: {
-  records: HighlightRecord[]; replay?: string | null;
+function Highlights({ records, replayHighlights }: {
+  records: HighlightRecord[]; replayHighlights?: Highlight[];
 }) {
-  const [stats, error, loading] = useLoad(async () => replay ? await loadReplayStats(replay) : null, [replay]);
   const [picked, setPicked] = useState<Highlight | null>(null);
   const hs = highlights(records);
-  if (stats) hs.push(...replayHighlights(stats.kills, records));
+  if (replayHighlights) hs.push(...replayHighlights);
   if (!hs.length) return null;
   return (
     <section class="card">
@@ -312,8 +310,6 @@ function Highlights({ records, replay }: {
           </table>
         </div>
       </Modal>}
-      {replay && loading && <p class="muted">Loading replay highlights…</p>}
-      {error && <p class="warn">Replay highlights unavailable: {error.message}</p>}
     </section>
   );
 }

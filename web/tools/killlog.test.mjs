@@ -9,7 +9,7 @@ const bundle = await build({
   },
   bundle: true, write: false, format: "esm", platform: "node", logLevel: "error",
 });
-const { playerKills, playerStreaks, minuteKills, loadReplayStats, playerReplayPeaks, replayHighlights,
+const { playerKills, playerStreaks, minuteKills,
   highlights, highlightLeaders, sortBoardRows } =
   await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`);
 
@@ -71,68 +71,6 @@ assert.deepEqual(minutes, [
 assert.deepEqual(minuteKills([], "Ann", [100, 100]), []);
 assert.deepEqual(minuteKills([kill(6000, "Ann", "Bob")], "Ann", [0, 12000]).map((m) => m.kills), [0, 1]);
 
-// Rolling windows cross fixed-minute boundaries. Exactly 60 seconds apart
-// is outside the same half-open window; input order and letter case vary.
-const rolling = [11900, 5900, 6100, 11899].map((t) => kill(t, "ANN", "Bob"));
-assert.deepEqual(playerReplayPeaks(rolling, "ann"), {
-  killsMinute: 3, deathsMinute: 0, killsBeforeDying: 4, deathsBeforeKill: 0,
-  killsMinuteWithoutDying: 3, deathsMinuteWithoutKilling: 0,
-});
-assert.equal(playerReplayPeaks(rolling, "BOB").deathsMinute, 3);
-assert.equal(playerReplayPeaks([kill(0, "Ann", "Bob"), kill(6000, "Ann", "Bob")], "Ann").killsMinute, 1);
-assert.equal(playerReplayPeaks([kill(0, "Ann", "Bob"), kill(6000, "Ann", "Bob")], "Ann").killsMinuteWithoutDying, 1);
-assert.equal(playerReplayPeaks([kill(0, "Ann", "Bob"), kill(6000, "Ann", "Bob")], "Bob").deathsMinuteWithoutKilling, 1);
-assert.equal(playerReplayPeaks([kill(5, "Ann", "Bob"), kill(5, "Ann", "Cy")], "Ann").killsMinute, 2);
-
-// Team kills count in minute peaks. They reset a kill-free minute run, but
-// not the existing enemy-kill-free death counter. Suicides count as deaths.
-const deathRun = [
-  kill(100, "Ann", "Bob"),
-  kill(200, "Bob", "Ann"),
-  kill(300, "Cy", "ANN", true),
-  kill(400, "Ann", "Ann", true),
-  kill(500, "ANN", "Cy", true),
-  kill(600, "Bob", "Ann"),
-  kill(700, "Ann", "Bob"),
-  kill(800, "Bob", "Ann"),
-];
-assert.deepEqual(playerReplayPeaks(deathRun, "Ann"), {
-  killsMinute: 3, deathsMinute: 5, killsBeforeDying: 1, deathsBeforeKill: 4,
-  killsMinuteWithoutDying: 1, deathsMinuteWithoutKilling: 3,
-});
-assert.equal(playerReplayPeaks([...deathRun,
-  ...[900, 1000, 1100, 1200, 1300].map((t) => kill(t, "Bob", "Ann")),
-], "Ann").deathsBeforeKill, 6);
-assert.deepEqual(playerReplayPeaks([], "Ann"), {
-  killsMinute: 0, deathsMinute: 0, killsBeforeDying: 0, deathsBeforeKill: 0,
-  killsMinuteWithoutDying: 0, deathsMinuteWithoutKilling: 0,
-});
-const splitLives = playerReplayPeaks([
-  kill(0, "Ann", "Bob"), kill(100, "ANN", "Cy", true),
-  kill(200, "Cy", "Ann", true),
-  kill(300, "Ann", "Bob"), kill(400, "Ann", "Cy"),
-], "ann");
-assert.equal(splitLives.killsMinute, 4);
-assert.equal(splitLives.killsMinuteWithoutDying, 2);
-
-// Only scoreboard players qualify. Shared leaders keep the existing
-// alphabetical order and three-name limit; absent metrics are not zeroes.
-const names = ["Zoe", "Cy", "Bob", "Ann"];
-const tied = replayHighlights(names.map((name) => kill(100, name, "Spectator")),
-  names.map((player_name) => ({ player_name })));
-assert.deepEqual(tied.map(({ ranking, ...summary }) => summary), [
-  { group: "Kills", label: "Most kills in a minute", names: ["Ann", "Bob", "Cy"], more: 1, value: "1" },
-  { group: "Kills", label: "Most enemy kills before dying", names: ["Ann", "Bob", "Cy"], more: 1, value: "1" },
-  { group: "Kills", label: "Most kills in a minute without dying", names: ["Ann", "Bob", "Cy"], more: 1, value: "1" },
-]);
-assert.deepEqual(tied[0].ranking, ["Ann", "Bob", "Cy", "Zoe"].map((name) => ({ name, value: "1" })));
-for (const h of replayHighlights(rolling, ["Ann", "Bob", "Cy"].map((player_name) => ({ player_name })))) {
-  assert.equal(h.ranking.length, 3);
-  assert.equal(h.ranking.at(-1).value, "0");
-}
-assert.deepEqual(replayHighlights([], [{ player_name: "Ann" }]), []);
-assert.deepEqual(replayHighlights(rolling, []), []);
-
 // Rankings are numeric (10 before 2), retain every tied player, and put
 // unknown values after genuine zeroes without turning them into zeroes.
 const ranked = highlightLeaders("Kills", "Numeric", [
@@ -181,35 +119,4 @@ const mixedNames = ["zed", "Ann", "BOB"].map((name) => ({ name, marker: null, ce
 assert.deepEqual(sortBoardRows(mixedNames, -1, "ascending").map((r) => r.name), ["Ann", "BOB", "zed"]);
 assert.deepEqual(sortBoardRows(mixedNames, -1, "descending").map((r) => r.name), ["zed", "BOB", "Ann"]);
 assert.deepEqual(boardRows.map((r) => r.name), ["Ann", "Bob", "Cy"]);
-// The same response supplies kills and item-use counts. A failed fetch
-// must be reported and evicted so the next open can retry.
-const originalFetch = globalThis.fetch;
-let calls = 0;
-const raw = {
-  source: { endTick: 18000 },
-  players: [{ player: 1, name: "Ann", shots: { repel: 4, burst: 2 } }, { player: 2, name: "Bob", shots: {} }],
-  killLog: [{ t: 100, killer: 1, killed: 2, weapon: null, teamKill: false, killerFreq: 0, killedFreq: 1 }],
-};
-try {
-  globalThis.fetch = async () => {
-    calls++;
-    return new Response(JSON.stringify(raw));
-  };
-  const [a, b] = await Promise.all([
-    loadReplayStats("https://example.test/r/match"),
-    loadReplayStats("https://example.test/r/match"),
-  ]);
-  assert.equal(calls, 1);
-  assert.equal(a, b);
-  assert.equal(a.end, 18000);
-  assert.equal(a.players[0].shots.repel, 4);
-  assert.equal(a.kills[0].killer, "Ann");
-  assert.equal(a.kills[0].weapon, "unknown");
-  globalThis.fetch = async () => new Response("", { status: 503 });
-  await assert.rejects(loadReplayStats("https://example.test/r/retry"), /503/);
-  globalThis.fetch = async () => new Response(JSON.stringify(raw));
-  assert.equal((await loadReplayStats("https://example.test/r/retry")).kills.length, 1);
-} finally {
-  globalThis.fetch = originalFetch;
-}
 console.log("killlog drilldowns: ok");
