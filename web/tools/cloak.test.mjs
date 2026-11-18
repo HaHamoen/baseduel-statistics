@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { cloakRuns } from "./cloak.mjs";
+import { cloakStats } from "./cloak.mjs";
 
 // A bent corridor: tile distance, not straight-line displacement.
 const points = [[0, 0], [1, 0], [2, 0], [2, 1], [1, 1], [0, 1], [0, 2]];
@@ -19,7 +19,7 @@ const control = {
 const round = { seq: 1, base: 1, start: 0, end: 10000 };
 
 // Existing movement cases use tick 0 as the end of the round's warmup.
-function compute(frames, { freq = 0, events = [], fires = [], rounds = [{ ...round, start: -1000 }] } = {}) {
+function stats(frames, { freq = 0, events = [], fires = [], rounds = [{ ...round, start: -1000 }] } = {}) {
   const track = { t: [], x: [], y: [], vx: [], vy: [], status: [] };
   for (const [t, tile, status = 2] of frames) {
     track.t.push(t);
@@ -33,8 +33,9 @@ function compute(frames, { freq = 0, events = [], fires = [], rounds = [{ ...rou
     lifeAt: () => ({ present: true, ship: 4, freq }),
     name: () => "Cloaker",
   };
-  return cloakRuns(doc, model, control, rounds);
+  return cloakStats(doc, model, control, rounds);
 }
+const compute = (frames, options) => stats(frames, options).runs;
 const tiles = (frames, options) => Math.max(0, ...compute(frames, options).map((r) => r.tiles));
 
 assert.equal(tiles([[0, 0], [10, 1], [20, 2], [30, 3], [40, 4], [50, 5], [60, 6]]), 6);
@@ -82,4 +83,19 @@ assert.deepEqual(compute([[980, 0], [990, 1], [1000, 2], [1010, 3],
 "every round has its own ten-second warmup");
 assert.equal(tiles([[0, 0], [10, 1]], { rounds: [{ ...round, end: 900 }] }), 0,
   "rounds shorter than ten seconds contribute nothing");
+
+const totals = (frames, options) => stats(frames, options).totals.map(({ tiles, seconds }) => ({ tiles, seconds }));
+assert.deepEqual(totals([[0, 0], [10, 1], [20, 2], [30, 2, 0], [40, 0],
+  [50, 1], [60, 2]]), [{ tiles: 4, seconds: 0.4 }], "total includes separate runs in the same round");
+assert.deepEqual(totals([[0, 0], [10, 0], [20, 0], [30, 1], [40, 0], [50, 1]]),
+  [{ tiles: 1, seconds: 0.5 }], "stationary and backtracking time counts, repeated advances do not");
+assert.deepEqual(totals(reveal, { fires: [{ player: 0, t: 20 }] }),
+  [{ tiles: 2, seconds: 0.2 }], "shooting joins progress but visible time is excluded");
+assert.deepEqual(totals([[980, 0], [990, 1], [1000, 2], [1010, 3]], { rounds: [round] }),
+  [{ tiles: 1, seconds: 0.1 }], "totals exclude the warmup");
+assert.deepEqual(totals([[0, 0], [10, 1], [200, 2], [210, 3]]),
+  [{ tiles: 2, seconds: 0.2 }], "missing data is not cloaked time or progress");
+assert.deepEqual(totals([[0, 0], [10, 1], [20, 2], [30, 3]],
+  { events: [{ type: "kill", killed: 0, t: 15 }] }),
+[{ tiles: 2, seconds: 0.2 }], "totals do not bridge deaths");
 console.log("cloak runs: ok");

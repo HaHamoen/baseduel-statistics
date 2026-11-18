@@ -1,7 +1,7 @@
 // Base control for every league replay, worked out by ss-replay's own code
 // (web/src/control.ts, model.ts, tiles.ts), bundled with esbuild and only
 // read: the site's chart and Held column are then the replay's own numbers.
-// cloak.mjs also measures replay-only cloaked advances on that base geometry.
+// cloak.mjs also measures replay-only cloaked advances and totals on that geometry.
 //   node tools/control.mjs <ss-replay data dir> <ss-replay web/src> <out dir>
 //
 // THE RULE is control.ts's: once a second, each floor tile of the base being
@@ -25,7 +25,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { gunzipSync } from "node:zlib";
 import { docRounds } from "./control-rounds.mjs";
-import { cloakRuns } from "./cloak.mjs";
+import { cloakStats } from "./cloak.mjs";
 
 const STEP = 100;          // ticks a sample: control.ts computeSeries' step, one a second
 
@@ -77,7 +77,8 @@ function compute(doc, lvl) {
     return { round: r.round, attempt: r.attempt, seq: r.seq, base: r.base, start: r.start, end,
       held: n ? sum / n : null, pct: n ? Math.round((sum / n) * 100) : null, shares };
   });
-  return { rounds: series, cloak: cloakRuns(doc, model, control, rounds),
+  const { runs: cloak, totals: cloakTotals } = cloakStats(doc, model, control, rounds);
+  return { rounds: series, cloak, cloakTotals,
     cloakPlayers: model.shipPlayers().map((p) => model.name(p)) };
 }
 

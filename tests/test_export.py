@@ -332,13 +332,20 @@ class TestMatches(ExportCase):
                 {"seq": 1, "name": "Spectator", "tiles": 2000, "start": 100,
                  "end": 800, "seconds": 7},
             ],
+            "cloakTotals": [
+                {"seq": 1, "name": "ann", "tiles": 25, "seconds": 60.1},
+                {"seq": 1, "name": "ANN", "tiles": 15, "seconds": 0.9},
+                {"seq": 1, "name": "Bob", "tiles": 30, "seconds": 20},
+                {"seq": 9, "name": "Ann", "tiles": 1000, "seconds": 1000},
+                {"seq": 1, "name": "Spectator", "tiles": 2000, "seconds": 2000},
+            ],
         }
         self.run_export(
             replays={"bdl-" + r: "bdl-" + r for r in recs[:2]},
             control={"bdl-" + recs[0]: replay_control,
                      "bdl-" + recs[2]: replay_control})
         shard = self.load("m/league/0.json")
-        highlight, = shard[str(a)]["control"]["highlights"]
+        highlight, totals = shard[str(a)]["control"]["highlights"]
         self.assertEqual((highlight["group"], highlight["value"],
                           highlight["names"]), ("Movement", "20 tiles",
                                                 ["Ann", "Bob"]))
@@ -348,6 +355,14 @@ class TestMatches(ExportCase):
             {"name": "Bob", "value": "20 tiles",
              "run": {"start": 200, "end": 600, "seconds": 4}},
             {"name": "Carl", "value": "0 tiles"},
+            {"name": "Dan", "value": None},
+        ])
+        self.assertEqual((totals["label"], totals["value"], totals["names"]),
+                         ("Total cloaked time & progress", "40 tiles", ["Ann"]))
+        self.assertEqual(totals["ranking"], [
+            {"name": "Ann", "value": "40 tiles / 1:01 cloaked"},
+            {"name": "Bob", "value": "30 tiles / 0:20 cloaked"},
+            {"name": "Carl", "value": "0 tiles / 0:00 cloaked"},
             {"name": "Dan", "value": None},
         ])
         for mid in (b, c):

@@ -186,9 +186,12 @@ def control_doc(match_id, doc, rounds, players=()):
                     "shares": r["shares"]})
     result = {"rounds": out} if out else None
     if result is not None:
-        highlight = cloak_highlight(doc, seqs, players)
-        if highlight:
-            result["highlights"] = [highlight]
+        highlights = [highlight for highlight in (
+            cloak_highlight(doc, seqs, players),
+            cloak_totals_highlight(doc, seqs, players),
+        ) if highlight]
+        if highlights:
+            result["highlights"] = highlights
     return result
 
 
@@ -234,6 +237,55 @@ def cloak_highlight(doc, seqs, players):
             "backtracking undoes progress. Shooting reveals of up to 2 seconds "
             "can join a run. Death, ship/team changes, warps/attaches, leaving "
             "the base, missing position data and round boundaries reset it. "
+            "A packet-derived estimate, not a bot stat."),
+    }
+
+
+def cloak_totals_highlight(doc, seqs, players):
+    """Total observed cloak time and each separate run's best advance."""
+    if "cloakTotals" not in doc:
+        return None
+    tracked = {fold(name) for name in doc.get("cloakPlayers", ())}
+    totals = {name: {"tiles": 0, "ticks": 0} for name in tracked}
+    for row in doc["cloakTotals"]:
+        name = fold(row["name"])
+        if row["seq"] not in seqs or name not in totals:
+            continue
+        totals[name]["tiles"] += row["tiles"]
+        totals[name]["ticks"] += round(row["seconds"] * 100)
+    scores = [(p["player_name"], totals.get(fold(p["player_name"])))
+              for p in players]
+    scores.sort(key=lambda row: (row[1] is None,
+                                -row[1]["tiles"] if row[1] else 0,
+                                fold(row[0])))
+    peak = max((value["tiles"] for _name, value in scores if value),
+               default=0)
+    if peak <= 0:
+        return None
+    leaders = sorted((name for name, value in scores
+                      if value and value["tiles"] == peak), key=fold)
+    ranking = []
+    for name, total in scores:
+        value = None
+        if total is not None:
+            seconds = total["ticks"] // 100
+            value = "%s tiles / %d:%02d cloaked" % (
+                total["tiles"], seconds // 60, seconds % 60)
+        ranking.append({"name": name, "value": value})
+    return {
+        "group": "Movement", "label": "Total cloaked time & progress",
+        "value": "%s tiles" % peak,
+        "names": leaders[:3], "more": max(0, len(leaders) - 3),
+        "ranking": ranking,
+        "description": (
+            "Ranked by total progress toward the enemy safe, summing each "
+            "separate cloak run's best net advance through the base corridors. "
+            "Backtracking and returning within a run does not earn progress "
+            "again. Time includes all observed cloaked time in the base, even "
+            "while stationary or retreating, not just the best runs. Visible "
+            "shooting gaps add no time or forward progress. Each round's "
+            "first 10 seconds, unmatched rounds and position discontinuities "
+            "are excluded. One tile is 16 pixels; time is minutes:seconds. "
             "A packet-derived estimate, not a bot stat."),
     }
 

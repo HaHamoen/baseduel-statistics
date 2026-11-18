@@ -56,6 +56,11 @@ The two are never added together: different arenas, different settings.
   position data and round boundaries reset the run. Only matched rounds
   count. This is a packet-derived estimate, not a bot stat; the ranking links
   to each player's best run and shows its observed cloaked time.
+  **Total cloaked time & progress** ranks players by the sum of each separate
+  cloak run's best net advance and shows their total observed cloaked time
+  alongside it. Stationary and retreating cloaked time counts too; visible
+  shooting gaps do not. Backtracking within a run does not farm progress.
+  The same round, warmup and position-continuity restrictions apply.
   Each highlight opens a complete highest-to-lowest ranking for the match;
   player names still link to career pages, and untracked values stay untracked.
   Highlights are grouped by score/time, kills, deaths, damage, teamwork, movement and
